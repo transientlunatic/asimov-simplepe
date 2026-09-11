@@ -289,6 +289,23 @@ jobs:
             grep -n "^def \|^class " "$PIPE_SRC" || true
             echo "--- lines mentioning corner/pesummary/convert_samples/JOB/dag ---"
             grep -n -i "corner\|pesummary\|convert_samples\|\.dag\b\|add_job\|write_dag\|CondorDAG\|dax" "$PIPE_SRC" || true
+            # The real question this whole diagnostic step exists to answer:
+            # every generated .dag file so far has contained only a
+            # DataFindNode job -- never an AnalysisNode/FilterNode (the
+            # actual metric/Fisher-matrix PE stage), CornerNode, or
+            # PostProcessingNode -- despite --generate_corner=True and
+            # --disable_pesummary not being passed. Dump main()'s complete
+            # body (where node creation is gated) to find the real
+            # condition controlling this, rather than guessing further.
+            TOTAL_LINES=$(wc -l < "$PIPE_SRC")
+            echo "--- full main() body (line 860 to EOF, file has $TOTAL_LINES lines) ---"
+            sed -n '860,$p' "$PIPE_SRC"
+            echo "--- DataFindNode class body (for comparison with AnalysisNode/FilterNode) ---"
+            sed -n '639,695p' "$PIPE_SRC"
+            echo "--- AnalysisNode class body ---"
+            sed -n '423,516p' "$PIPE_SRC"
+            echo "--- FilterNode class body ---"
+            sed -n '516,639p' "$PIPE_SRC"
           fi
 
       - name: Run asimov monitor for the Simple-PE production
