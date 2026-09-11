@@ -63,6 +63,20 @@ jobs:
         run: |
           simple_pe_pipe --help || true
 
+      # Diagnostic for a real bug this e2e test caught: a multi-value
+      # `--channels`/`--asd` ini entry (space-separated IFO:VALUE tokens,
+      # exactly as simple_pe_pipe's own --help says to format it) is still
+      # left as a raw, unconverted string rather than the dict
+      # `_format_arg_lists()` expects, for both one and two detectors --
+      # so this isn't an ini-formatting mistake on this plugin's side,
+      # it's some mechanism in how simple_pe_pipe itself turns an ini file
+      # into argparse values. Dumping the real source (unconditionally,
+      # like --help above) rather than guessing a fourth ini format blind.
+      - name: Dump simple_pe_pipe source for diagnostics
+        run: |
+          python3 -c "import simple_pe.cli.simple_pe_pipe as m; print(m.__file__)"
+          cat "$(python3 -c 'import simple_pe.cli.simple_pe_pipe as m; print(m.__file__)')"
+
       - name: Set up git
         run: |
           su - submituser <<SUBMITUSER
