@@ -227,6 +227,23 @@ jobs:
             find working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test -maxdepth 2 || true
             echo "--- trigger_parameters.ini ---"
             cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/trigger_parameters.ini || true
+            # A prior real run showed the datafind node completing with exit
+            # status 0 (real GWOSC data fetched successfully for both H1 and
+            # L1) and DAGMan itself EXITING WITH STATUS 0 -- but the DAG only
+            # ever contained "1 total nodes" (just datafind), and no
+            # posterior samples file ever appeared. --help documents that
+            # pesummary post-processing runs *by default* (unless
+            # --disable_pesummary is passed, which this ini doesn't) and
+            # --generate_corner (set True here) should add a
+            # simple_pe_corner node -- so the DAG apparently should contain
+            # more than one node. Dump the real .dag file and the companion
+            # local-run bash script (both already confirmed to exist from
+            # the submit/ directory listing) to see the actual node
+            # structure simple_pe_pipe built, rather than guessing why.
+            echo "--- submit/*.dag (the real DAG structure) ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/submit/*.dag || true
+            echo "--- submit/bash_simple_pe.sh (the companion local-run script) ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/submit/bash_simple_pe.sh || true
 
       # This is the real completion criterion asimov_simplepe's
       # detect_completion() checks for -- not a smoke-test proxy. Reaching
