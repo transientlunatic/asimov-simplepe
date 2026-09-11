@@ -142,8 +142,8 @@ This walks through a complete example.
           L1: 20
       data:
         channels:
-          H1: INJ
-          L1: INJ
+          H1: GWOSC
+          L1: GWOSC
         asd:
           H1: /path/to/aLIGO_asd.txt
           L1: /path/to/aLIGO_asd.txt
@@ -224,12 +224,14 @@ is given as a literal file path.
 
 ``simple_pe_pipe`` also recognises two special ``data.channels`` values,
 confirmed directly from its own ``--help`` text: ``GWOSC``, to read public
-GWOSC open data instead of a private frame channel, and ``INJ``, to have
-``simple_pe_pipe`` simulate an injection itself rather than reading any real
-strain data at all -- no datafind access needed. This is what this plugin's
-own end-to-end test uses, paired with a real ASD file (generated at CI time
-from pycbc's analytic ``aLIGOZeroDetHighPower`` model) to colour the
-simulated noise. Whenever any interferometer uses ``INJ``,
+GWOSC open data instead of a private frame channel -- this plugin's own
+end-to-end test uses this, against GW150914's real data, paired with a
+real ASD file (generated at CI time from pycbc's analytic
+``aLIGOZeroDetHighPower`` model) since a PSD is needed for the
+Fisher-matrix/SNR calculation regardless of where the strain data comes
+from -- and ``INJ``, to have ``simple_pe_pipe`` simulate an injection
+itself rather than reading any real strain data at all -- no datafind
+access needed. Whenever any interferometer uses ``INJ``,
 :meth:`before_config() <asimov_simplepe.simplepe.SimplePE.before_config>`
 also writes an ``injection.json`` file from the production's ``trigger``
 metadata (masses/spins in the underscored LIGO convention
@@ -245,6 +247,18 @@ whenever any channel is ``INJ``:
        H1: INJ
      asd:
        H1: /path/to/aLIGO_asd.txt
+
+.. warning::
+
+   ``INJ`` mode currently hits a genuine upstream ``simple-pe`` bug once
+   ``write_converted_injection_parameters()`` runs: a ``SimplePESamples``-
+   wrapped value eventually produces a NaN GPS time, sending LALSuite's
+   ``XLALGPSSetREAL8()`` into what is for all practical purposes an
+   infinite loop -- confirmed directly via this plugin's own e2e CI (see
+   ``CHANGELOG.md`` for the full trail). This plugin's own code fully
+   supports ``INJ`` (unit-tested) and will use it correctly once this is
+   fixed upstream, but its own e2e test uses ``GWOSC`` instead to avoid
+   depending on that fix.
 
 Status messages
 ~~~~~~~~~~~~~~~~

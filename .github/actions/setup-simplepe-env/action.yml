@@ -42,11 +42,13 @@ runs:
       with:
         path: /usr/share/miniconda/envs/asimov
         # Includes this action's own file in the key: the pip constraints
-        # (setuptools<82, numpy<2) that make the cached env actually work
-        # live inside this file, not in conda/packages.txt/pyproject.toml
-        # -- confirmed directly that omitting it here would have made a
-        # numpy<2 fix silently no-op on a cache hit from an already-cached,
-        # unpinned-numpy env restored from an earlier run in this same PR.
+        # (setuptools<82) that make the cached env actually work live
+        # inside this file, not in conda/packages.txt/pyproject.toml --
+        # confirmed directly (while investigating an unrelated numpy pin
+        # that was tried and reverted, see CHANGELOG) that omitting it
+        # here would let a constraint change silently no-op on a cache hit
+        # restored from an already-cached env from an earlier run in this
+        # same PR that predates it.
         key: conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-${{ inputs.simple-pe-ref }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml', '.github/actions/setup-simplepe-env/action.yml') }}
         restore-keys: |
           conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-
@@ -83,30 +85,10 @@ runs:
         # the pin from the first. A constraints file (applied to every pip
         # invocation in this environment, including asimov-simplepe's own
         # install below) is what actually holds the pin across installs.
-        #
-        # numpy<2 is a second, independent constraint, for a separate real
-        # bug: simple_pe.io.io.estimate_data_length_from_template_parameters
-        # does `int(2**(np.ceil(np.log2(wf_len))))` on a value derived from
-        # a SimplePESamples-wrapped injection dict (SimplePESamples is a
-        # pesummary-style samples container, so even a single scalar comes
-        # back as a shape-(1,) array, not a true 0-d array) -- confirmed
-        # directly via this plugin's own e2e CI:
-        # `TypeError: only 0-dimensional arrays can be converted to Python
-        # scalars`. NumPy deprecated (1.25) then hard-errored (2.0) this
-        # exact implicit shape-(1,)-array-to-scalar conversion; pre-2.0 it
-        # was only a DeprecationWarning. This is a genuine upstream
-        # simple-pe/numpy-2 incompatibility, not anything this ini/config
-        # can work around -- every value shape that reaches
-        # `write_converted_injection_parameters` hits the same code path
-        # regardless of what's in `--injection`'s JSON. Pinning numpy<2
-        # here (like setuptools<82 above) keeps it a warning instead of a
-        # crash without touching simple-pe's own source.
         echo "setuptools<82" > /tmp/simple-pe-constraints.txt
-        echo "numpy<2" >> /tmp/simple-pe-constraints.txt
-        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "setuptools<82" "numpy<2"
+        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "setuptools<82"
         "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
         echo "Installed setuptools at: $("$CONDA_PYTHON" -c 'import setuptools; print(setuptools.__version__)')"
-        echo "Installed numpy at: $("$CONDA_PYTHON" -c 'import numpy; print(numpy.__version__)')"
         "$CONDA_PYTHON" -c 'import pkg_resources' && echo "pkg_resources importable: yes" || (echo "::error::pkg_resources is not importable after the setuptools<82 pin" && exit 1)
         echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
 
@@ -117,14 +99,13 @@ runs:
         CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
         CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
         "$CONDA_PYTHON" -m ensurepip --upgrade
-        # Re-applies the same setuptools<82/numpy<2 constraints as the
-        # simple-pe install step above (see its comments) -- this install
-        # is unconditional (unlike that one, which is skipped on a
-        # conda-env cache hit), and without the constraints here too,
-        # installing this package's own dependencies could just as easily
-        # re-resolve either one past its boundary.
+        # Re-applies the same setuptools<82 constraint as the simple-pe
+        # install step above (see its comment) -- this install is
+        # unconditional (unlike that one, which is skipped on a conda-env
+        # cache hit), and without the constraint here too, installing this
+        # package's own dependencies could just as easily re-resolve
+        # setuptools back past the pkg_resources removal boundary.
         echo "setuptools<82" > /tmp/simple-pe-constraints.txt
-        echo "numpy<2" >> /tmp/simple-pe-constraints.txt
         "$CONDA_PYTHON" -m pip install --force-reinstall -c /tmp/simple-pe-constraints.txt -e ".[test]"
         # Regular (non-editable) installs set explicit, world-readable
         # permissions from the wheel's RECORD; an editable install's

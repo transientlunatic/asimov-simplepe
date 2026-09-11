@@ -132,20 +132,30 @@ conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
   the leading `IFO:` (this plugin adds that itself when rendering the
   ini). `simple_pe_pipe` also recognises two special values here,
   confirmed directly from its own `--help` text: `GWOSC` to read public
-  GWOSC open data instead of a private frame channel, and `INJ` to have
-  `simple_pe_pipe` simulate an injection itself rather than reading any
-  real strain data at all -- no datafind access needed (this is what
-  this plugin's own end-to-end test uses). When any interferometer uses
-  `INJ`, `before_config()` also writes an `injection.json` file from the
-  production's `trigger` metadata and the ini references it via
-  `injection = ...` -- `simple_pe_datafind` requires this unconditionally
-  in that case (confirmed directly from its real source, via this
-  plugin's own e2e CI).
+  GWOSC open data instead of a private frame channel (this plugin's own
+  end-to-end test uses this, against GW150914's real data), and `INJ`
+  to have `simple_pe_pipe` simulate an injection itself rather than
+  reading any real strain data at all -- no datafind access needed.
+  When any interferometer uses `INJ`, `before_config()` also writes an
+  `injection.json` file from the production's `trigger` metadata and
+  the ini references it via `injection = ...` -- `simple_pe_datafind`
+  requires this unconditionally in that case (confirmed directly from
+  its real source, via this plugin's own e2e CI). **Known issue:**
+  `INJ` mode currently hits a genuine upstream `simple-pe` bug once
+  `write_converted_injection_parameters()` runs (a `SimplePESamples`-
+  wrapped value eventually produces a NaN GPS time, sending LALSuite
+  into what is for all practical purposes an infinite loop) --
+  confirmed directly via this plugin's own e2e CI (see `CHANGELOG.md`
+  for the full trail); this plugin's own code fully supports `INJ`
+  (unit-tested) and will use it correctly once fixed upstream, but the
+  e2e test itself uses `GWOSC` instead to avoid depending on that fix.
 - `data.asd` -- per-interferometer path to a real, two-column (frequency,
   ASD) text file. There is no analytic-PSD-model-name shortcut here --
   confirmed directly from `--help` ("ASD files to use for the analysis")
   and from this plugin's own e2e CI, which generates a real file from
-  pycbc's analytic `aLIGOZeroDetHighPower` model for its `INJ`-mode test.
+  pycbc's analytic `aLIGOZeroDetHighPower` model for its test (a PSD is
+  needed for the Fisher-matrix/SNR calculation regardless of where the
+  strain data itself comes from).
 
 This means a production populated by a data-retrieval step (for example
 [asimov-gwdata](https://github.com/etive-io/asimov-gwdata)) can be picked

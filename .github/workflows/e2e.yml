@@ -202,10 +202,11 @@ jobs:
       # e2e tests, which pre-seed a hand-validated ini (something that
       # would require running the real simple_pe_pipe interactively first,
       # which isn't possible in the environment this plugin was authored
-      # in -- see README's Compatibility note). A simulated ASD
-      # (aLIGOZeroDetHighPower) is requested via `data.asd`, matching the
-      # confirmed `asd` config key, so no real strain data or datafind
-      # access should be required if that key behaves as documented.
+      # in -- see README's Compatibility note). This production requests
+      # real GWOSC strain data for GW150914 via `data.channels: GWOSC`
+      # (see simplepe_production.yaml's comment for why not a simulated
+      # INJ injection instead), so this step does real network I/O to
+      # GWOSC's public data servers -- not just a local/simulated run.
       - name: Add and build the real Simple-PE production
         uses: etive-io/actions/run-asimov-command@v1
         with:
