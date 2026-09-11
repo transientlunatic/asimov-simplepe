@@ -38,7 +38,7 @@ conda-forge, so install it from its GitLab repository (it depends on ``pycbc`` a
 .. code-block:: bash
 
    conda install -c conda-forge pycbc lalsuite
-   pip install setuptools  # see the pkg_resources note below
+   pip install "setuptools<82"  # see the pkg_resources note below
    pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
    pip install asimov-simplepe
 
@@ -47,7 +47,7 @@ From source:
 .. code-block:: bash
 
    conda install -c conda-forge pycbc lalsuite
-   pip install setuptools  # see the pkg_resources note below
+   pip install "setuptools<82"  # see the pkg_resources note below
    pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
    git clone https://github.com/transientlunatic/asimov-simplepe.git
    cd asimov-simplepe
@@ -66,11 +66,13 @@ From source:
    ``simple_pe_pipe`` imports ``pycbc.waveform``, whose
    ``retrieve_waveform_plugins()`` does a bare ``import pkg_resources`` (see
    `simple-pe issue #29 <https://git.ligo.org/stephen-fairhurst/simple-pe/-/issues/29>`_,
-   still open upstream). Without ``setuptools`` installed in the target
-   environment, ``simple_pe_pipe`` fails to even import with
-   ``ModuleNotFoundError: No module named 'pkg_resources'`` -- confirmed
-   directly via this plugin's own end-to-end CI run. Install ``setuptools``
-   first, as shown above, to work around it.
+   still open upstream). ``setuptools`` removed the bundled
+   ``pkg_resources`` module starting with 82.0.0 (confirmed directly:
+   81.0.0 still provides it, 82.0.0 doesn't), so ``simple_pe_pipe`` fails
+   to even import with ``ModuleNotFoundError: No module named
+   'pkg_resources'`` against an unpinned (or too-recent) ``setuptools`` --
+   confirmed directly via this plugin's own end-to-end CI run. Pin
+   ``setuptools<82`` first, as shown above, to work around it.
 
 Tutorial: from a fresh project to posterior samples
 ----------------------------------------------------

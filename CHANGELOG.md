@@ -46,15 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scheduler, waiting for a real, parseable posterior samples file.
 
 ### Fixed
-- `.github/actions/setup-simplepe-env` now explicitly installs `setuptools`
-  before `simple_pe_pipe`: `simple_pe_pipe` imports `pycbc.waveform`, whose
-  `retrieve_waveform_plugins()` does a bare `import pkg_resources` (see
-  [simple-pe issue #29](https://git.ligo.org/stephen-fairhurst/simple-pe/-/issues/29),
-  still open upstream). Without `setuptools` present, `simple_pe_pipe`
-  fails to even import (`ModuleNotFoundError: No module named
-  'pkg_resources'`) -- confirmed directly via this plugin's own e2e CI run
-  against the real, live `simple_pe_pipe`, which is exactly the failure
-  this fix addresses.
+- `.github/actions/setup-simplepe-env` now pins `setuptools<82` before
+  installing `simple_pe_pipe`: `simple_pe_pipe` imports `pycbc.waveform`,
+  whose `retrieve_waveform_plugins()` does a bare `import pkg_resources`
+  (see [simple-pe issue #29](https://git.ligo.org/stephen-fairhurst/simple-pe/-/issues/29),
+  still open upstream). `setuptools` removed the bundled `pkg_resources`
+  module starting with 82.0.0 (confirmed directly: 81.0.0 still provides
+  it, 82.0.0 doesn't); without the pin, `simple_pe_pipe` fails to even
+  import (`ModuleNotFoundError: No module named 'pkg_resources'`) --
+  confirmed directly via this plugin's own e2e CI run against the real,
+  live `simple_pe_pipe`, which is exactly the failure this fix addresses.
+  (An earlier, unpinned `pip install setuptools` fix looked plausible
+  locally but didn't actually resolve this -- the environment already had
+  `setuptools`, just a too-new version -- so this is a stricter follow-up,
+  found by empirically bisecting setuptools releases with a real
+  `import pkg_resources` check rather than assuming a specific version
+  boundary.)
 
 ### Notes
 - `simple_pe_pipe`'s exact ini schema and output filenames are not fully

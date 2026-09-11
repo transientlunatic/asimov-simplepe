@@ -66,13 +66,15 @@ runs:
         # pycbc.waveform.plugin.retrieve_waveform_plugins() does a bare
         # `import pkg_resources` (see simple-pe issue #29, "PyCBC version
         # needs to be updated because pkg_resources is deprecated" -- still
-        # open upstream). `ensurepip` alone doesn't guarantee `setuptools`
-        # (and therefore `pkg_resources`) is present in the target
-        # environment, so simple_pe_pipe fails to even import with
-        # `ModuleNotFoundError: No module named 'pkg_resources'` without it.
-        # Confirmed directly: this exact traceback is what a real
-        # `simple_pe_pipe` invocation produced before this line was added.
-        "$CONDA_PYTHON" -m pip install setuptools
+        # open upstream). setuptools removed the bundled `pkg_resources`
+        # module starting with 82.0.0 (confirmed directly: 81.0.0 still
+        # provides it, 82.0.0 raises `ModuleNotFoundError: No module named
+        # 'pkg_resources'` -- and that exact traceback is what a real
+        # `simple_pe_pipe` invocation produced against an unpinned
+        # setuptools before this line was added), so the latest setuptools
+        # a plain `pip install setuptools` resolves to today no longer
+        # works here. Pin below that boundary.
+        "$CONDA_PYTHON" -m pip install "setuptools<82"
         "$CONDA_PYTHON" -m pip install "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
         echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
 

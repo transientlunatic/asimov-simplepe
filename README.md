@@ -53,18 +53,20 @@ available from conda-forge):
 
 ```bash
 conda install -c conda-forge pycbc lalsuite
-pip install setuptools  # see note below
+pip install "setuptools<82"  # see note below
 pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
 ```
 
 > **`pkg_resources` note.** `simple_pe_pipe` imports `pycbc.waveform`, which
 > does a bare `import pkg_resources` in `retrieve_waveform_plugins()` (see
 > [simple-pe issue #29](https://git.ligo.org/stephen-fairhurst/simple-pe/-/issues/29),
-> still open upstream at the time of writing). If `setuptools` isn't
-> installed in the target environment, `simple_pe_pipe` fails to even
-> import with `ModuleNotFoundError: No module named 'pkg_resources'` --
-> confirmed directly via this plugin's own CI. Installing `setuptools`
-> first (as above) works around it.
+> still open upstream). `setuptools` removed the bundled `pkg_resources`
+> module starting with 82.0.0 (confirmed directly: 81.0.0 still provides
+> it, 82.0.0 doesn't), so `simple_pe_pipe` fails to even import with
+> `ModuleNotFoundError: No module named 'pkg_resources'` against an
+> unpinned (or too-recent) `setuptools` -- confirmed directly via this
+> plugin's own CI. Pinning `setuptools<82` first (as above) works around
+> it.
 
 > **A note on the config schema below.** `simple_pe_pipe`'s ini format
 > isn't fully documented publicly. The keys used by this plugin's bundled
