@@ -263,20 +263,22 @@ jobs:
             echo "--- error/*.error ---"
             cat error/*.error || true
 
-      # The peak_finder fix (see asimov_simplepe/configs/simplepe.ini) got
-      # the DAG building a real multi-node pipeline (datafind -> filter ->
-      # analysis -> corner/postprocessing), but a real run then crashed
-      # the `filter` node: `json.decoder.JSONDecodeError: Expecting value:
-      # line 1 column 2 (char 1)` at `simple_pe/io/io.py:29: data =
-      # json.load(f)`, inside `load_trigger_parameters_from_file()`,
-      # called from `simple_pe_filter.py:957`. This plugin's own
-      # before_config() writes trigger_parameters.ini as an INI file
-      # (configparser.RawConfigParser, `[parameters]\nmass1 = 36\n...`),
-      # but simple_pe_filter's `--trigger_parameters` clearly expects a
-      # JSON file instead. Dump load_trigger_parameters_from_file's real
-      # source, and how simple_pe_filter.py consumes the dict it returns
-      # (key names -- likely mass_1/mass_2 like the injection.json schema,
-      # but confirm rather than guess), to fix this for real.
+      # The datafind/filter nodes both now complete successfully (real
+      # GWOSC data, real trigger/ASD files, no more numpy/path bugs). The
+      # `analysis` node now runs real physics (Fisher-matrix metric
+      # peak-finding, SNR computation) but crashes deep inside
+      # PESummary's own rejection-sampling reweighting step:
+      # `OverflowError: Range exceeds valid bounds` at
+      # `pesummary/core/reweight.py:21: idx = weights >
+      # np.random.uniform(0, np.max(weights), len(weights))`, immediately
+      # preceded by `RuntimeWarning: divide by zero encountered in
+      # divide` in pycbc's Array division -- consistent with an `inf` (or
+      # NaN) weight somewhere blowing up `np.max(weights)`. Dump the real
+      # source around where these weights are computed
+      # (reweight_based_on_observed_snrs in simple_pe/param_est/pe.py)
+      # and rejection_sampling itself, to understand whether this is
+      # avoidable via config (fewer samples, a different seed, disabling
+      # reweighting) or a genuine upstream numerical-robustness bug.
       #
       # A plain `run:` step (not etive-io/actions/run-asimov-command), so
       # this can freely use shell variables -- placed here, late in the
@@ -285,19 +287,22 @@ jobs:
       # anchored to the tail: an early step's output was confirmed to
       # fall entirely outside that window on a real run and was
       # unrecoverable even with a very large explicit tail_lines.
-      - name: Dump trigger-parameters loading source for diagnostics
+      - name: Dump reweighting/rejection-sampling source for diagnostics
         if: always()
         run: |
-          IOSRC=$(python3 -c "import simple_pe.io.io as m; print(m.__file__)")
-          echo "--- $IOSRC: load_trigger_parameters_from_file ---"
-          LN=$(grep -n "^def load_trigger_parameters_from_file" "$IOSRC" | head -1 | cut -d: -f1)
-          sed -n "${LN},$((LN+40))p" "$IOSRC"
-          FILTERSRC=$(python3 -c "import simple_pe.cli.simple_pe_filter as m; print(m.__file__)")
-          echo "--- $FILTERSRC: context around load_trigger_parameters_from_file call and use ---"
-          LN=$(grep -n "load_trigger_parameters_from_file" "$FILTERSRC" | head -1 | cut -d: -f1)
-          sed -n "${LN},$((LN+50))p" "$FILTERSRC"
-          echo "--- lines referencing trigger_parameters in simple_pe_filter.py ---"
-          grep -n "trigger_parameters\[" "$FILTERSRC" || true
+          PESRC=$(python3 -c "import simple_pe.param_est.pe as m; print(m.__file__)")
+          echo "--- $PESRC: reweight_based_on_observed_snrs ---"
+          LN=$(grep -n "^def reweight_based_on_observed_snrs" "$PESRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+60))p" "$PESRC"
+          RWSRC=$(python3 -c "import pesummary.core.reweight as m; print(m.__file__)")
+          echo "--- $RWSRC: rejection_sampling (full file, it's small) ---"
+          cat "$RWSRC"
+          ANASRC=$(python3 -c "import simple_pe.cli.simple_pe_analysis as m; print(m.__file__)")
+          echo "--- $ANASRC: context around generate_samples_from_aligned_spin_template_parameters call ---"
+          LN=$(grep -n "generate_samples_from_aligned_spin_template_parameters" "$ANASRC" | head -1 | cut -d: -f1)
+          sed -n "$((LN>10?LN-10:1)),$((LN+20))p" "$ANASRC"
+          echo "--- --help text for nsamples/neffective/seed (possible mitigation knobs) ---"
+          simple_pe_analysis --help 2>&1 | grep -A3 -- "--nsamples\|--neffective\|--seed" || true
 
       # Re-run simple_pe_pipe directly against the exact same
       # already-rendered ini to see its own diagnostic output
