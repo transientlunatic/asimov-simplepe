@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `.github/actions/setup-simplepe-env` now also pins `numpy<2`, for a
+  genuine upstream `simple-pe`/NumPy-2 incompatibility hit by this
+  plugin's own `INJ`-mode e2e test: `simple_pe.io.io.estimate_data_length_from_template_parameters`
+  does `int(2**(np.ceil(np.log2(wf_len))))` on a value read out of a
+  `SimplePESamples`-wrapped injection dict; `SimplePESamples` is a
+  pesummary-style samples container, so even a single scalar comes back
+  as a shape-`(1,)` array rather than a true 0-d array. NumPy
+  deprecated (1.25) then hard-errored (2.0) this exact implicit
+  shape-`(1,)`-to-scalar conversion, so under NumPy 2 this raises
+  `TypeError: only 0-dimensional arrays can be converted to Python
+  scalars` -- confirmed directly via this plugin's own e2e CI, which
+  also confirmed this is unavoidable through any `--injection` JSON
+  content: `simple_pe_datafind` reaches this exact code path
+  unconditionally once any channel is `INJ`, regardless of what's in
+  the injection file. Not something this plugin's ini/config can work
+  around, so pinned in the CI environment instead (same pattern as the
+  existing `setuptools<82` pin, and applied via the same constraints
+  file so it isn't silently re-resolved past 2 by a later `pip
+  install`). Also had to extend the "Cache asimov-simplepe conda env"
+  cache key to hash this action's own file (previously only
+  `conda/packages.txt`/`pyproject.toml`): confirmed directly that a
+  pin added only inside this action's install steps would otherwise
+  silently no-op on a cache hit restored from an earlier CI run in this
+  same PR that predates the pin.
 - e2e test / README / docs: `data.asd` must be a real, two-column
   (frequency, ASD) text file -- there is no analytic-PSD-model-name
   shortcut in `simple_pe_pipe`'s CLI, confirmed directly from `--help`
