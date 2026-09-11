@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `.github/actions/setup-simplepe-env` re-pins `numpy<2` (see "Fixed"
+  below for the earlier attempt that was reverted). A real e2e run
+  against `GWOSC` mode (after the `peak_finder`/`trigger_parameters.json`
+  fixes below got the real `filter` DAG node running for the first
+  time) hit the exact same `estimate_data_length_from_template_parameters`
+  `TypeError` as before -- but this time via a different, genuinely
+  unavoidable path: `simple_pe_filter`'s own
+  `load_trigger_parameters_from_file()` wraps the loaded
+  trigger-parameters dict in `SimplePESamples` *unconditionally*, on
+  every real analysis regardless of channel mode, before passing it into
+  the same broken function. This is different from the earlier,
+  injection-only trigger for the same bug: `write_converted_injection_
+  parameters()` is structurally unreachable now that this plugin's e2e
+  test uses `GWOSC` (that function is only ever called when
+  `--injection` is passed), so the earlier NaN-GPS-time infinite loop
+  that made the first `numpy<2` attempt actively harmful cannot recur
+  here -- confirmed by reasoning through the actual call graph, not
+  reused as a blind retry of a previously-reverted fix.
 - `before_config()`/`_trigger_parameters_file()`: the trigger-parameters
   file is now written as JSON (`trigger_parameters.json`), not an ini
   file -- confirmed directly from `simple_pe_filter`'s real source

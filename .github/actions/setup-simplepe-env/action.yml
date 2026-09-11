@@ -85,10 +85,35 @@ runs:
         # the pin from the first. A constraints file (applied to every pip
         # invocation in this environment, including asimov-simplepe's own
         # install below) is what actually holds the pin across installs.
+        #
+        # numpy<2 is a second, independent constraint. A `numpy<2` pin was
+        # tried once before and reverted (see CHANGELOG) because it only
+        # seemed to help the (INJ-mode-only) injection code path, where it
+        # unmasked a worse, unrelated bug specific to that path. Since
+        # then this plugin's e2e test moved to GWOSC mode, which never
+        # touches that path -- and a real e2e run against GWOSC mode
+        # confirmed the *real*, unavoidable trigger is
+        # `simple_pe_filter`'s own `load_trigger_parameters_from_file()`,
+        # used on every real analysis regardless of channel mode: it
+        # wraps the loaded trigger-parameters dict in `SimplePESamples` (a
+        # pesummary-style samples container -- built for posterior
+        # *chains*, so even a single scalar comes back as a shape-(1,)
+        # array rather than a true 0-d array) before
+        # `simple_pe.io.io.estimate_data_length_from_template_parameters`
+        # does `int(2**(np.ceil(np.log2(wf_len))))` on a value derived
+        # from it. NumPy hard-errors this exact implicit
+        # shape-(1,)-to-scalar conversion since 2.0 (a DeprecationWarning
+        # before that): `TypeError: only 0-dimensional arrays can be
+        # converted to Python scalars`, confirmed directly via this
+        # plugin's own e2e CI on the real `filter` DAG node. Pinning
+        # numpy<2 here keeps it a warning instead of a crash without
+        # touching simple-pe's own source.
         echo "setuptools<82" > /tmp/simple-pe-constraints.txt
-        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "setuptools<82"
+        echo "numpy<2" >> /tmp/simple-pe-constraints.txt
+        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "setuptools<82" "numpy<2"
         "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
         echo "Installed setuptools at: $("$CONDA_PYTHON" -c 'import setuptools; print(setuptools.__version__)')"
+        echo "Installed numpy at: $("$CONDA_PYTHON" -c 'import numpy; print(numpy.__version__)')"
         "$CONDA_PYTHON" -c 'import pkg_resources' && echo "pkg_resources importable: yes" || (echo "::error::pkg_resources is not importable after the setuptools<82 pin" && exit 1)
         echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
 
@@ -99,13 +124,14 @@ runs:
         CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
         CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
         "$CONDA_PYTHON" -m ensurepip --upgrade
-        # Re-applies the same setuptools<82 constraint as the simple-pe
-        # install step above (see its comment) -- this install is
-        # unconditional (unlike that one, which is skipped on a conda-env
-        # cache hit), and without the constraint here too, installing this
-        # package's own dependencies could just as easily re-resolve
-        # setuptools back past the pkg_resources removal boundary.
+        # Re-applies the same setuptools<82/numpy<2 constraints as the
+        # simple-pe install step above (see its comments) -- this install
+        # is unconditional (unlike that one, which is skipped on a
+        # conda-env cache hit), and without the constraints here too,
+        # installing this package's own dependencies could just as easily
+        # re-resolve either one past its boundary.
         echo "setuptools<82" > /tmp/simple-pe-constraints.txt
+        echo "numpy<2" >> /tmp/simple-pe-constraints.txt
         "$CONDA_PYTHON" -m pip install --force-reinstall -c /tmp/simple-pe-constraints.txt -e ".[test]"
         # Regular (non-editable) installs set explicit, world-readable
         # permissions from the wheel's RECORD; an editable install's
