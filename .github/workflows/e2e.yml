@@ -63,87 +63,6 @@ jobs:
         run: |
           simple_pe_pipe --help || true
 
-      # A real e2e run's generated .dag file contained only a single
-      # `datafind` job -- no metric/peak-find, corner-plot, or PESummary
-      # node -- despite `--help` documenting that PESummary post-processing
-      # runs by default (no `--disable_pesummary` passed) and this ini
-      # setting `generate_corner = True` (which should run
-      # `simple_pe_corner` per --help). Dump simple_pe_pipe's own DAG-
-      # building source (the actual `simple_pe_pipe` script/module, not
-      # simple_pe_datafind) to see what really determines the DAG's node
-      # set, rather than guessing at a missing flag.
-      - name: Dump simple_pe_pipe DAG-building source for diagnostics
-        run: |
-          PIPE_EXE=$(command -v simple_pe_pipe)
-          echo "--- $PIPE_EXE (entry script) ---"
-          cat "$PIPE_EXE" || true
-          PIPE_MOD=$(python3 -c "
-          import runpy, re
-          with open('$PIPE_EXE') as f:
-              src = f.read()
-          m = re.search(r'from (simple_pe[\w.]*) import', src) or re.search(r'^import (simple_pe[\w.]*)', src, re.M)
-          print(m.group(1) if m else '')
-          ")
-          echo "--- resolved module: $PIPE_MOD ---"
-          if [ -n "$PIPE_MOD" ]; then
-            PIPE_SRC=$(python3 -c "import importlib; m = importlib.import_module('$PIPE_MOD'); print(m.__file__)")
-            echo "--- $PIPE_SRC ---"
-            echo "--- top-level def/class outline ---"
-            grep -n "^def \|^class " "$PIPE_SRC" || true
-            echo "--- lines mentioning corner/pesummary/convert_samples/JOB/dag ---"
-            grep -n -i "corner\|pesummary\|convert_samples\|\.dag\b\|add_job\|write_dag\|CondorDAG\|dax" "$PIPE_SRC" || true
-          fi
-
-      # A real e2e run against `data.channels.<IFO>: INJ` (the documented
-      # magic value for "simulate an injection, don't read real strain
-      # data") crashed the DAG's datafind node with
-      # `TypeError: stat: path should be string, bytes, os.PathLike or
-      # integer, not NoneType` at
-      # `simple_pe/cli/simple_pe_datafind.py:648: if not
-      # os.path.isfile(opts.injection):` -- `--injection` defaults to
-      # `None` (confirmed from --help above) and that line doesn't guard
-      # against `None` before calling `os.path.isfile()` on it. This means
-      # INJ mode needs a real `--injection` JSON file passed in, but
-      # `--help` doesn't document that file's required schema ("A json
-      # file giving the injection parameters of a signal you wish to
-      # inject"), so dump the real source around every `injection`
-      # reference here rather than guessing its keys.
-      - name: Dump simple_pe_datafind source for diagnostics
-        run: |
-          SRC=$(python3 -c "import simple_pe.cli.simple_pe_datafind as m; print(m.__file__)")
-          echo "--- $SRC ---"
-          grep -n -i injection "$SRC" || true
-          echo "--- context around each injection reference ---"
-          grep -n -i injection "$SRC" | cut -d: -f1 | while read -r ln; do
-            echo "==== line $ln ===="
-            sed -n "$((ln>15?ln-15:1)),$((ln+15))p" "$SRC"
-          done
-          echo "--- simple_pe.io.io.load_psd_from_file source (insurance: --asd/--psd's real"
-          echo "    required file format, in case the generated ASD file below isn't quite right) ---"
-          IOSRC=$(python3 -c "import simple_pe.io.io as m; print(m.__file__)")
-          echo "--- $IOSRC ---"
-          LN=$(grep -n "^def load_psd_from_file" "$IOSRC" | head -1 | cut -d: -f1)
-          sed -n "${LN},$((LN+60))p" "$IOSRC"
-          echo "--- simple_pe.io.io.estimate_data_length_from_template_parameters source"
-          echo "    (a prior real e2e run crashed here: TypeError: only 0-dimensional arrays"
-          echo "    can be converted to Python scalars, at"
-          echo "    'return max(int(2**(np.ceil(np.log2(wf_len)))), minimum_data_length)') ---"
-          LN=$(grep -n "^def estimate_data_length_from_template_parameters" "$IOSRC" | head -1 | cut -d: -f1)
-          sed -n "${LN},$((LN+40))p" "$IOSRC"
-          echo "--- simple_pe.io.io.load_strain_data_from_file source (the caller on the"
-          echo "    crashing path: write_converted_injection_parameters -> load_strain_data_from_file"
-          echo "    -> estimate_data_length_from_template_parameters, vs the OTHER, successful"
-          echo "    call to the same function earlier in main()) ---"
-          LN=$(grep -n "^def load_strain_data_from_file" "$IOSRC" | head -1 | cut -d: -f1)
-          sed -n "${LN},$((LN+40))p" "$IOSRC"
-          echo "--- simple_pe_datafind.py write_converted_injection_parameters source (the"
-          echo "    crash's immediate caller) ---"
-          LN=$(grep -n "^def write_converted_injection_parameters" "$SRC" | head -1 | cut -d: -f1)
-          sed -n "${LN},$((LN+90))p" "$SRC"
-          echo "--- where SimplePESamples is imported from (injection_parameters gets"
-          echo "    wrapped in this before the crashing call) ---"
-          grep -n "SimplePESamples" "$SRC" || true
-
       # `--asd`/`--psd` are real file paths, not analytic-model names --
       # confirmed directly from `--help` ("ASD files to use for the
       # analysis") and from a real e2e run: passing the analytic model name
@@ -330,6 +249,47 @@ jobs:
             cat output/*.output || true
             echo "--- error/*.error ---"
             cat error/*.error || true
+
+      # A real e2e run's generated .dag file contained only a single
+      # `datafind` job -- no metric/peak-find, corner-plot, or PESummary
+      # node -- despite `--help` documenting that PESummary post-processing
+      # runs by default (no `--disable_pesummary` passed) and this ini
+      # setting `generate_corner = True` (which should run
+      # `simple_pe_corner` per --help). Dump simple_pe_pipe's own DAG-
+      # building source (the actual `simple_pe_pipe` script/module, not
+      # simple_pe_datafind) to see what really determines the DAG's node
+      # set, rather than guessing at a missing flag.
+      #
+      # A plain `run:` step (not etive-io/actions/run-asimov-command), so
+      # this can freely use shell variables -- placed here, late in the
+      # job (rather than right after the --help dump, where an earlier
+      # version of this step lived), because GitHub's job-log API appears
+      # to cap how much log content this plugin's own diagnostics can
+      # retrieve, always anchored to the tail: an early step's output was
+      # confirmed to fall entirely outside that window on a real run and
+      # was unrecoverable even with a very large explicit tail_lines.
+      - name: Dump simple_pe_pipe DAG-building source for diagnostics
+        if: always()
+        run: |
+          PIPE_EXE=$(command -v simple_pe_pipe)
+          echo "--- $PIPE_EXE (entry script) ---"
+          cat "$PIPE_EXE" || true
+          PIPE_MOD=$(python3 -c "
+          import re
+          with open('$PIPE_EXE') as f:
+              src = f.read()
+          m = re.search(r'from (simple_pe[\w.]*) import', src) or re.search(r'^import (simple_pe[\w.]*)', src, re.M)
+          print(m.group(1) if m else '')
+          ")
+          echo "--- resolved module: $PIPE_MOD ---"
+          if [ -n "$PIPE_MOD" ]; then
+            PIPE_SRC=$(python3 -c "import importlib; m = importlib.import_module('$PIPE_MOD'); print(m.__file__)")
+            echo "--- $PIPE_SRC ---"
+            echo "--- top-level def/class outline ---"
+            grep -n "^def \|^class " "$PIPE_SRC" || true
+            echo "--- lines mentioning corner/pesummary/convert_samples/JOB/dag ---"
+            grep -n -i "corner\|pesummary\|convert_samples\|\.dag\b\|add_job\|write_dag\|CondorDAG\|dax" "$PIPE_SRC" || true
+          fi
 
       - name: Run asimov monitor for the Simple-PE production
         uses: etive-io/actions/run-asimov-command@v1
