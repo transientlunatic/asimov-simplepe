@@ -57,11 +57,13 @@ From source:
 
 .. note::
 
-   ``simple_pe_pipe``'s ini format isn't fully documented publicly. This plugin's
-   bundled template and output-file detection are a best-effort match against
-   ``simple-pe``'s own public documentation and issue tracker -- see the
-   *Compatibility* note in the README if you hit a mismatch against a real
-   ``simple_pe_pipe`` release.
+   This plugin's bundled template's config keys and value formats are
+   confirmed directly against a real, live ``simple_pe_pipe --help`` and a
+   real successful DAG build in its own end-to-end CI. Its output-file
+   detection (``samples()``) is still an unconfirmed best-effort guess,
+   though -- see the *Compatibility* note in the README if you hit a
+   mismatch there (or anywhere else) against a real ``simple_pe_pipe``
+   release.
 
 .. note::
 

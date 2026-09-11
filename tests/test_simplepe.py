@@ -540,6 +540,18 @@ class TestRealConfigRendering:
         assert parser.get(
             "pipeline", "accounting_group"
         ) == mock_production.meta["scheduler"]["accounting group"]
+        # --channels/--asd take nargs='+' space-separated IFO:VALUE tokens
+        # (confirmed directly against a real `simple_pe_pipe --help`), not
+        # a Python dict literal -- regression test for a real bug caught
+        # by this plugin's own e2e CI: simple_pe_pipe crashed with
+        # `AttributeError: 'str' object has no attribute 'items'` when fed
+        # a `{ 'H1': ... }`-style value here.
+        assert parser.get("pipeline", "channels").split() == [
+            "H1:H1:GDS-CALIB_STRAIN", "L1:L1:GDS-CALIB_STRAIN",
+        ]
+        assert parser.get("pipeline", "asd").split() == [
+            "H1:/data/H1_asd.txt", "L1:/data/L1_asd.txt",
+        ]
 
 
 def test_module_imports():

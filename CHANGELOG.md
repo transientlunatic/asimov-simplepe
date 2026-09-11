@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `configs/simplepe.ini`: `channels`/`asd` now render as `simple_pe_pipe`'s
+  own `--help` says they must be -- space-separated `IFO:VALUE` tokens
+  (e.g. `H1:path/to/file L1:path/to/file`), not a Python dict literal.
+  Confirmed directly via this plugin's own e2e CI run against the real,
+  live `simple_pe_pipe`: with the dict-literal form, `simple_pe_pipe`
+  actually ran (this is what confirmed every other config key --
+  `trigger_time`, `trigger_parameters`, `outdir`, `f_low`, `f_high`,
+  `approximant`, `accounting_group`, `accounting_group_user`,
+  `generate_corner` -- was already correct) but crashed with
+  `AttributeError: 'str' object has no attribute 'items'` while building
+  its argument list, because `--asd`'s dict-literal string happened to
+  parse via `ast.literal_eval` while `--channels`'s didn't.
+
 ### Added
 - Initial release of the `asimov-simplepe` plugin, integrating
   [simple-pe](https://git.ligo.org/stephen-fairhurst/simple-pe) (a rapid,
@@ -64,13 +78,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary.)
 
 ### Notes
-- `simple_pe_pipe`'s exact ini schema and output filenames are not fully
-  documented publicly; this plugin's `configs/simplepe.ini` template and
-  `samples()` glob patterns are a best-effort match against the
-  confirmed-public subset of `simple_pe_pipe`'s config keys (`trigger_time`,
-  `trigger_parameters`, `outdir`, `channels`, `asd`, `f_low`, `f_high`,
-  `approximant`, `accounting_group`, `accounting_group_user`,
-  `generate_corner`) and the DAG/bash-script-generating behaviour described
-  in its documentation. See the *Compatibility* section of the README for
-  details, and please file an issue (or PR) if you find a mismatch against
-  a real `simple_pe_pipe` release.
+- `configs/simplepe.ini`'s config keys (`trigger_time`, `trigger_parameters`,
+  `outdir`, `channels`, `asd`, `f_low`, `f_high`, `approximant`,
+  `accounting_group`, `accounting_group_user`, `generate_corner`) and
+  value formats are now confirmed directly against a real, live
+  `simple_pe_pipe --help` and a real successful DAG build in this
+  plugin's own e2e CI, not just its public documentation/issue tracker.
+  `samples()`'s output-filename glob patterns remain a best-effort guess,
+  not yet confirmed against a real completed run -- please file an issue
+  (or PR) if you find a mismatch there.

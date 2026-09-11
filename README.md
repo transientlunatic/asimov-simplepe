@@ -73,16 +73,17 @@ pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple
 > constraints file applied to both commands, as above, is what actually
 > holds the pin.
 
-> **A note on the config schema below.** `simple_pe_pipe`'s ini format
-> isn't fully documented publicly. The keys used by this plugin's bundled
-> template (`configs/simplepe.ini`) -- `trigger_time`, `trigger_parameters`,
-> `outdir`, `channels`, `asd`, `f_low`, `f_high`, `approximant`,
-> `accounting_group`, `accounting_group_user`, `generate_corner` -- are
-> drawn from `simple-pe`'s own public documentation and issue tracker, and
-> its output-file detection (`samples()`) searches for common
-> posterior/samples filenames rather than assuming one exact name. If you
-> hit a mismatch against a real `simple_pe_pipe` release, please open an
-> issue or PR.
+> **A note on the config schema below.** The keys used by this plugin's
+> bundled template (`configs/simplepe.ini`) -- `trigger_time`,
+> `trigger_parameters`, `outdir`, `channels`, `asd`, `f_low`, `f_high`,
+> `approximant`, `accounting_group`, `accounting_group_user`,
+> `generate_corner` -- and their value formats are confirmed directly
+> against a real, live `simple_pe_pipe --help` and a real successful DAG
+> build in this plugin's own end-to-end CI. Its output-file detection
+> (`samples()`) is still an unconfirmed best-effort guess, though: it
+> searches for common posterior/samples filenames rather than one exact
+> confirmed name. If you hit a mismatch there (or anywhere else) against a
+> real `simple_pe_pipe` release, please open an issue or PR.
 
 ## Installation
 
