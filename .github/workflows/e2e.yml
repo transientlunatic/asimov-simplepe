@@ -297,16 +297,27 @@ jobs:
             # --disable_pesummary not being passed. Dump main()'s complete
             # body (where node creation is gated) to find the real
             # condition controlling this, rather than guessing further.
-            TOTAL_LINES=$(wc -l < "$PIPE_SRC")
-            echo "--- full main() body (line 860 to EOF, file has $TOTAL_LINES lines) ---"
-            sed -n '860,$p' "$PIPE_SRC"
-            echo "--- DataFindNode class body (for comparison with AnalysisNode/FilterNode) ---"
-            sed -n '639,695p' "$PIPE_SRC"
-            echo "--- AnalysisNode class body ---"
-            sed -n '423,516p' "$PIPE_SRC"
-            echo "--- FilterNode class body ---"
-            sed -n '516,639p' "$PIPE_SRC"
           fi
+
+      # Confirmed directly from the real source (dumped above in earlier
+      # rounds): simple_pe_pipe's main() unconditionally constructs
+      # FilterNode/AnalysisNode/PostProcessingNode/CornerNode for every
+      # entry in opts.peak_finder, with no visible gate that would skip
+      # them -- yet every real .dag file produced so far contains only the
+      # DataFindNode job. asimov's own build_dag() captures
+      # simple_pe_pipe's stdout/stderr (including its `logger.info(opts)`
+      # full parsed Namespace dump and any per-node construction errors)
+      # but doesn't surface it to this CI log. Re-run simple_pe_pipe
+      # directly against the exact same already-rendered ini to see that
+      # raw output first-hand, rather than continuing to infer from
+      # source alone.
+      - name: Re-run simple_pe_pipe directly to see its own diagnostic output
+        if: always()
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            simple_pe_pipe checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses/simplepe-test.ini || true
 
       - name: Run asimov monitor for the Simple-PE production
         uses: etive-io/actions/run-asimov-command@v1
