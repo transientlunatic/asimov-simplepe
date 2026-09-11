@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `config_template`: added `peak_finder = metric` (configurable via
+  `production.meta['peak_finder']`), the actual root cause of the DAG
+  containing only a `DataFindNode` job -- confirmed directly via this
+  plugin's own e2e CI, using `simple_pe_pipe`'s real `logger.info(opts)`
+  dump of its parsed argument `Namespace`. `--peak_finder` defaults to
+  `[]` (confirmed directly from `--help`), and `simple_pe_pipe`'s
+  `main()` builds every real analysis DAG node (`FilterNode`/
+  `AnalysisNode`/`CornerNode`/`PostProcessingNode`) inside `for
+  peak_finder in opts.peak_finder:` -- with an empty list that loop runs
+  zero times, so those nodes silently never get created. There's no
+  crash or warning of any kind: `simple_pe_pipe` exits 0 and writes a
+  perfectly well-formed, valid single-node DAG, which is what made this
+  so easy to miss and took several rounds of real e2e CI (culminating in
+  re-running `simple_pe_pipe` directly to capture its own diagnostic
+  output, since `asimov`'s `build_dag()` doesn't surface it) to actually
+  find. `metric` is used as the default since it matches simple-pe's own
+  Fisher-matrix design (its headline algorithm, per `--help`'s own
+  examples).
 - e2e test: switched from `data.channels.<IFO>: INJ` (a simulated
   injection) to `GWOSC` (real public strain data for GW150914, whose
   real GPS time and approximate parameters the test fixtures already

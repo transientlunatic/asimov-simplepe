@@ -122,6 +122,18 @@ scheduler:
 accompanying trigger-parameters file) from the bundled template (unless a
 config already exists in the event repository), build a DAG, and submit it.
 
+### Peak finder
+
+`peak_finder` (default `metric`, simple-pe's own Fisher-matrix algorithm)
+selects the peak-finding method `simple_pe_pipe` uses, e.g. `production.meta['peak_finder']: scipy`.
+This isn't optional in practice: `simple_pe_pipe`'s real `--peak_finder`
+CLI option defaults to an *empty list*, and its DAG-building code creates
+every actual analysis stage (the match-filter, metric, corner-plot, and
+PESummary jobs) inside a loop over that list -- an empty list means the
+loop runs zero times and the DAG silently ends up containing only its
+`datafind` job, no error of any kind. Confirmed directly via this
+plugin's own e2e CI, which is why this template always sets it.
+
 ### Data
 
 Strain data is read from a production's `data` metadata, using the same

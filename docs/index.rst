@@ -161,6 +161,18 @@ This walks through a complete example.
    (unless an ini already exists in the event repository), ``build`` runs
    ``simple_pe_pipe`` to construct the DAG, and ``submit`` submits it.
 
+   .. note::
+
+      The rendered ini always sets ``peak_finder`` (default ``metric``,
+      overridable via ``production.meta['peak_finder']``, e.g.
+      ``scipy``). This isn't cosmetic: ``simple_pe_pipe``'s real
+      ``--peak_finder`` defaults to an *empty list*, and its DAG-building
+      code creates every actual analysis stage (match-filter, metric,
+      corner-plot, PESummary) inside a loop over that list -- an empty
+      list means the loop runs zero times and the DAG silently ends up
+      containing only its ``datafind`` job, with no error at all.
+      Confirmed directly via this plugin's own e2e CI.
+
 4. Wait for it to finish, checking status with:
 
    .. code-block:: bash

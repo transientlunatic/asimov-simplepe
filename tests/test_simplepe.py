@@ -631,6 +631,45 @@ class TestRealConfigRendering:
             parser.get("pipeline", "asd")
             == "{H1:/data/H1_asd.txt,L1:/data/L1_asd.txt}"
         )
+        # --peak_finder defaults to [] (confirmed directly from --help),
+        # and simple_pe_pipe's main() builds the real analysis DAG nodes
+        # (FilterNode/AnalysisNode/CornerNode/PostProcessingNode) inside
+        # `for peak_finder in opts.peak_finder:` -- with an empty list
+        # that loop runs zero times, so those nodes silently never get
+        # created (the DAG ends up containing only the DataFindNode job,
+        # with no error of any kind). Confirmed directly via this
+        # plugin's own e2e CI, using its real `logger.info(opts)` dump
+        # of the parsed Namespace. Regression test for this real bug.
+        assert parser.get("pipeline", "peak_finder") == "metric"
+
+    def test_template_renders_custom_peak_finder(
+        self, mock_production, mock_config, temp_dir
+    ):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["peak_finder"] = "scipy"
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert parser.get("pipeline", "peak_finder") == "scipy"
 
     def test_template_renders_injection_key_for_inj_channels(
         self, mock_production, mock_config, temp_dir
