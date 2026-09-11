@@ -170,18 +170,33 @@ jobs:
       # output here means the *reason* shows up directly in this job's
       # log, rather than only in the on-failure artifact upload (which
       # needs a separate download-and-unzip round trip to read at all).
+      #
+      # No shell variables in this script: etive-io/actions/run-asimov-command
+      # wraps it in `su - submituser <<SUBMITUSER ... SUBMITUSER` with an
+      # *unquoted* heredoc delimiter, which expands any `$var` here against
+      # the outer root shell (where it's unset) before the heredoc body ever
+      # reaches submituser's shell -- confirmed directly: an earlier version
+      # of this step used a `for f in ...; do cat "$f"; done` loop and
+      # produced zero output despite the target files existing, for exactly
+      # this reason (the same class of bug documented in the sibling
+      # asimov-pycbc e2e.yml). `cat`'s own multi-file globbing needs no
+      # variable at all.
       - name: Dump DAGMan and node logs for diagnostics
         if: always()
         uses: etive-io/actions/run-asimov-command@v1
         with:
           script: |
-            cd e2e_project/working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test
-            for f in submit/*.dag.dagman.out submit/*.dag.nodes.log log/*.log output/*.output error/*.error; do
-              if [ -e "$f" ]; then
-                echo "--- $f ---"
-                cat "$f"
-              fi
-            done
+            cd e2e_project/working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test || true
+            echo "--- dagman.out ---"
+            cat submit/*.dag.dagman.out || true
+            echo "--- nodes.log ---"
+            cat submit/*.dag.nodes.log || true
+            echo "--- log/*.log ---"
+            cat log/*.log || true
+            echo "--- output/*.output ---"
+            cat output/*.output || true
+            echo "--- error/*.error ---"
+            cat error/*.error || true
 
       - name: Run asimov monitor for the Simple-PE production
         uses: etive-io/actions/run-asimov-command@v1
