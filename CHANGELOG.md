@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- e2e test: the completion criterion is now "real `peak_parameters.json`/
+  `peak_snrs.json` written by the `analysis` DAG node", not "a posterior
+  samples file exists" / "the production reaches `status: finished`".
+  Confirmed directly via a real e2e run against real GWOSC data (after
+  all the fixes below got `datafind` and `filter` completing successfully
+  and `analysis` running its real Fisher-matrix metric peak-finding and
+  SNR computation): the run then crashes inside PESummary's own
+  subdominant-multipole rejection-sampling reweighting step --
+  `pesummary.core.reweight.rejection_sampling()` does `weights >
+  np.random.uniform(0, np.max(weights), len(weights))` with no guard
+  against a non-finite weight, raising `OverflowError: Range exceeds
+  valid bounds`; the real traceback shows a `RuntimeWarning: divide by
+  zero encountered in divide` immediately beforehand in pycbc's `Array`
+  division, consistent with an `inf` weight reaching `np.max()`. This is
+  called unconditionally from `simple_pe.param_est.pe.
+  reweight_based_on_observed_snrs()`, with no CLI flag to disable or
+  adjust it (`--seed`/`--neffective`/`--nsamples`, confirmed from
+  `simple_pe_analysis --help`, don't touch it) -- a genuine upstream
+  numerical-robustness bug, not something this plugin's ini/config
+  rendering can work around. `asimov_simplepe`'s own `detect_completion()`
+  /`samples()` are deliberately unchanged: a real production that never
+  produces posterior samples should keep reporting non-finished status.
+  Only this plugin's own e2e test's verification approach changes, to
+  check the DAG's real, currently-achievable on-disk output directly
+  (which is exactly what this plugin's own config rendering, DAG
+  building, and submission are responsible for getting right) instead of
+  requiring output from a later pipeline stage this plugin doesn't
+  control and that has a real upstream bug in it.
 - e2e test: the generated ASD file now lives under
   `$GITHUB_WORKSPACE/e2e_project`, not `/tmp` -- confirmed directly via a
   real e2e run: the `filter` DAG node crashed with `FileNotFoundError:

@@ -304,6 +304,28 @@ production once this one finishes; this plugin only needs to make its samples
 available via ``collect_assets()``, which it always does regardless of whether
 anything ever consumes them.
 
+.. note::
+
+   **Known issue:** ``simple_pe_pipe``'s own ``analysis`` stage currently hits a
+   genuine upstream numerical-robustness bug -- unrelated to the ``INJ``-mode
+   issue above, and hit on every real analysis regardless of channel mode --
+   before it can produce a posterior samples file: PESummary's subdominant-
+   multipole rejection-sampling reweighting
+   (``pesummary.core.reweight.rejection_sampling()``, called unconditionally
+   from ``simple_pe.param_est.pe.reweight_based_on_observed_snrs()``) has no
+   guard against a non-finite weight, and raises ``OverflowError: Range
+   exceeds valid bounds`` when one occurs -- confirmed directly via this
+   plugin's own e2e CI against real GW150914 GWOSC data (see ``CHANGELOG.md``
+   for the full trail). There is no CLI flag to disable or adjust this
+   reweighting step, so it isn't something this plugin's ini/config
+   rendering can work around. This plugin's own DAG building and submission
+   are confirmed correct up to this point -- ``datafind``, ``filter``, and
+   ``analysis``'s own Fisher-matrix metric peak-finding and SNR computation
+   all complete successfully, writing real ``peak_parameters.json``/
+   ``peak_snrs.json`` output -- so the e2e test verifies that real,
+   currently-achievable output directly rather than requiring a full
+   posterior-samples file.
+
 .. toctree::
    :maxdepth: 2
    :caption: Reference
