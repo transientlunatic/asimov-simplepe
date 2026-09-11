@@ -1,8 +1,15 @@
 # Test blueprint for the real Simple-PE production under test. Its ini is
-# rendered from asimov_simplepe's bundled config_template (see e2e.yml),
-# using a simulated analytic ASD (aLIGOZeroDetHighPower) via `data.asd` so
-# the run doesn't need real strain data or datafind access. Two detectors,
-# not one -- see fake_event.yaml's comment for why that matters here.
+# rendered from asimov_simplepe's bundled config_template (see e2e.yml).
+# `data.channels.<IFO>: INJ` is simple_pe_pipe's own documented magic
+# value (confirmed directly from its real --help text) for "simulate an
+# injection instead of reading real strain data" -- a literal channel
+# name here (this plugin's first attempt) is read as a real channel to
+# look up via datafind, which is why a real e2e run hung for the full
+# job timeout: its datafind node was trying to reach a real datafind
+# service that doesn't exist in this sandboxed HTCondor container.
+# `data.asd` (a simulated analytic ASD, aLIGOZeroDetHighPower) colours
+# that simulated noise. Two detectors, not one -- see fake_event.yaml's
+# comment for why that matters here.
 kind: analysis
 name: simplepe-test
 pipeline: simplepe
@@ -24,8 +31,8 @@ likelihood:
     L1: 20
 data:
   channels:
-    H1: H1:FAKE-STRAIN
-    L1: L1:FAKE-STRAIN
+    H1: INJ
+    L1: INJ
   asd:
     H1: aLIGOZeroDetHighPower
     L1: aLIGOZeroDetHighPower

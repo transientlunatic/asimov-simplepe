@@ -142,8 +142,8 @@ This walks through a complete example.
           L1: 20
       data:
         channels:
-          H1: H1:FAKE-STRAIN
-          L1: L1:FAKE-STRAIN
+          H1: INJ
+          L1: INJ
         asd:
           H1: aLIGOZeroDetHighPower
           L1: aLIGOZeroDetHighPower
@@ -204,27 +204,34 @@ This walks through a complete example.
 Data
 ----
 
-Strain data is read from a production's ``data`` meta-data, using the same
-conventions as the sibling GW pipeline plugins (``asimov-lalinference``,
-``asimov-pycbc``) and `asimov-gwdata <https://github.com/etive-io/asimov-gwdata>`_:
+Strain data is read from a production's ``data`` meta-data. ``data.channels``
+is the channel name *without* the leading ``IFO:`` (this plugin adds that
+itself when rendering the ini); ``data.asd`` is a path to an ASD file (or an
+analytic PSD model name for simulated noise):
 
 .. code-block:: yaml
 
    data:
      channels:
-       H1: H1:DCS-CALIB_STRAIN_CLEAN_C01
-       L1: L1:DCS-CALIB_STRAIN_CLEAN_C01
+       H1: DCS-CALIB_STRAIN_CLEAN_C01
+       L1: DCS-CALIB_STRAIN_CLEAN_C01
      asd:
        H1: /path/to/H1_asd.txt
        L1: /path/to/L1_asd.txt
 
-or, for simulated noise (as used by this plugin's own end-to-end test):
+``simple_pe_pipe`` also recognises two special ``data.channels`` values,
+confirmed directly from its own ``--help`` text: ``GWOSC``, to read public
+GWOSC open data instead of a private frame channel, and ``INJ``, to have
+``simple_pe_pipe`` simulate an injection itself rather than reading any real
+strain data at all -- no datafind access needed. This is what this plugin's
+own end-to-end test uses, paired with a simulated analytic ASD to colour the
+simulated noise:
 
 .. code-block:: yaml
 
    data:
      channels:
-       H1: H1:FAKE-STRAIN
+       H1: INJ
      asd:
        H1: aLIGOZeroDetHighPower
 

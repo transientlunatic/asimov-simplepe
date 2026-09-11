@@ -128,15 +128,23 @@ Strain data is read from a production's `data` metadata, using the same
 conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
 `asimov-gwdata`, `asimov-lalinference`, `asimov-pycbc`):
 
-- `data.channels` -- per-interferometer strain channel names.
+- `data.channels` -- per-interferometer strain channel name, *without*
+  the leading `IFO:` (this plugin adds that itself when rendering the
+  ini). `simple_pe_pipe` also recognises two special values here,
+  confirmed directly from its own `--help` text: `GWOSC` to read public
+  GWOSC open data instead of a private frame channel, and `INJ` to have
+  `simple_pe_pipe` simulate an injection itself rather than reading any
+  real strain data at all -- no datafind access needed (this is what
+  this plugin's own end-to-end test uses).
 - `data.asd` -- per-interferometer amplitude spectral density: either a
-  path to an ASD file, or (for simulated-noise testing) the name of an
-  analytic PSD model.
+  path to an ASD file, or (for simulated-noise testing, e.g. alongside
+  `data.channels: INJ`) the name of an analytic PSD model.
 
 This means a production populated by a data-retrieval step (for example
 [asimov-gwdata](https://github.com/etive-io/asimov-gwdata)) can be picked
 up by making the `simplepe` production `needs:` that data-retrieval
-production and mapping its output into `data.channels`/`data.asd`.
+production and mapping its output into `data.channels`/`data.asd` (stripping
+the data-retrieval step's own `IFO:` channel prefix, if it includes one).
 
 ### Trigger parameters
 

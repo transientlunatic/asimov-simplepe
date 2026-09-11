@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- e2e test / README / docs: use `data.channels.<IFO>: INJ` (confirmed
+  directly from `simple_pe_pipe --help`: a documented magic value
+  meaning "simulate an injection, don't read real strain data") instead
+  of a made-up literal channel name (`H1:FAKE-STRAIN`). With a literal
+  name, `simple_pe_pipe` reads it as a real channel to look up via
+  datafind -- confirmed directly via this plugin's own e2e CI, where the
+  DAG's `datafind` node hung for the full job timeout trying to reach a
+  real datafind service that doesn't exist in the sandboxed HTCondor
+  container. `--help` also documents a `GWOSC` magic value for reading
+  public GWOSC open data, now documented alongside `INJ`.
 - `configs/simplepe.ini`: `channels`/`asd` now render in the one format
   that actually survives `simple_pe_pipe`'s real config-file handling --
   a brace-wrapped, comma-separated `{IFO:value,IFO:value}` string, with
