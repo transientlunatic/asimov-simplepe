@@ -62,6 +62,17 @@ runs:
         CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
         CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
         "$CONDA_PYTHON" -m ensurepip --upgrade
+        # simple_pe_pipe -> simple_pe.waveforms -> pycbc.waveform ->
+        # pycbc.waveform.plugin.retrieve_waveform_plugins() does a bare
+        # `import pkg_resources` (see simple-pe issue #29, "PyCBC version
+        # needs to be updated because pkg_resources is deprecated" -- still
+        # open upstream). `ensurepip` alone doesn't guarantee `setuptools`
+        # (and therefore `pkg_resources`) is present in the target
+        # environment, so simple_pe_pipe fails to even import with
+        # `ModuleNotFoundError: No module named 'pkg_resources'` without it.
+        # Confirmed directly: this exact traceback is what a real
+        # `simple_pe_pipe` invocation produced before this line was added.
+        "$CONDA_PYTHON" -m pip install setuptools
         "$CONDA_PYTHON" -m pip install "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
         echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
 

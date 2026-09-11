@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `simple_pe_pipe` DAG built and submitted through a real HTCondor
   scheduler, waiting for a real, parseable posterior samples file.
 
+### Fixed
+- `.github/actions/setup-simplepe-env` now explicitly installs `setuptools`
+  before `simple_pe_pipe`: `simple_pe_pipe` imports `pycbc.waveform`, whose
+  `retrieve_waveform_plugins()` does a bare `import pkg_resources` (see
+  [simple-pe issue #29](https://git.ligo.org/stephen-fairhurst/simple-pe/-/issues/29),
+  still open upstream). Without `setuptools` present, `simple_pe_pipe`
+  fails to even import (`ModuleNotFoundError: No module named
+  'pkg_resources'`) -- confirmed directly via this plugin's own e2e CI run
+  against the real, live `simple_pe_pipe`, which is exactly the failure
+  this fix addresses.
+
 ### Notes
 - `simple_pe_pipe`'s exact ini schema and output filenames are not fully
   documented publicly; this plugin's `configs/simplepe.ini` template and
