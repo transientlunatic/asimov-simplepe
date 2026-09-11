@@ -540,18 +540,28 @@ class TestRealConfigRendering:
         assert parser.get(
             "pipeline", "accounting_group"
         ) == mock_production.meta["scheduler"]["accounting group"]
-        # --channels/--asd take nargs='+' space-separated IFO:VALUE tokens
-        # (confirmed directly against a real `simple_pe_pipe --help`), not
-        # a Python dict literal -- regression test for a real bug caught
-        # by this plugin's own e2e CI: simple_pe_pipe crashed with
-        # `AttributeError: 'str' object has no attribute 'items'` when fed
-        # a `{ 'H1': ... }`-style value here.
-        assert parser.get("pipeline", "channels").split() == [
-            "H1:H1:GDS-CALIB_STRAIN", "L1:L1:GDS-CALIB_STRAIN",
-        ]
-        assert parser.get("pipeline", "asd").split() == [
-            "H1:/data/H1_asd.txt", "L1:/data/L1_asd.txt",
-        ]
+        # simple_pe_pipe's config-file handling
+        # (pesummary.core.cli.actions.ConfigAction, confirmed directly
+        # from the real installed source) does its own ad-hoc ini value
+        # parsing wherever a value contains ":" or "{" -- not argparse's
+        # own nargs='+' machinery, despite --help describing these as
+        # space-separated CLI tokens (only accurate for real command-line
+        # use). Its dict_from_str() requires the whole value wrapped in
+        # braces (comma-separated, no spaces needed) and -- confirmed
+        # directly against the real pesummary parser -- cannot handle a
+        # colon *inside* a dict value at all, so channel names must not
+        # repeat the "IFO:" prefix already used as the dict key (matching
+        # --help's own example: `H1:HWINJ_INJECTED`, not
+        # `H1:H1:HWINJ_INJECTED`). Regression test for two real bugs this
+        # plugin's own e2e CI caught in earlier ini formats.
+        assert (
+            parser.get("pipeline", "channels")
+            == "{H1:GDS-CALIB_STRAIN,L1:GDS-CALIB_STRAIN}"
+        )
+        assert (
+            parser.get("pipeline", "asd")
+            == "{H1:/data/H1_asd.txt,L1:/data/L1_asd.txt}"
+        )
 
 
 def test_module_imports():

@@ -8,18 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- `configs/simplepe.ini`: `channels`/`asd` now render as `simple_pe_pipe`'s
-  own `--help` says they must be -- space-separated `IFO:VALUE` tokens
-  (e.g. `H1:path/to/file L1:path/to/file`), not a Python dict literal.
-  Confirmed directly via this plugin's own e2e CI run against the real,
-  live `simple_pe_pipe`: with the dict-literal form, `simple_pe_pipe`
-  actually ran (this is what confirmed every other config key --
-  `trigger_time`, `trigger_parameters`, `outdir`, `f_low`, `f_high`,
-  `approximant`, `accounting_group`, `accounting_group_user`,
-  `generate_corner` -- was already correct) but crashed with
-  `AttributeError: 'str' object has no attribute 'items'` while building
-  its argument list, because `--asd`'s dict-literal string happened to
-  parse via `ast.literal_eval` while `--channels`'s didn't.
+- `configs/simplepe.ini`: `channels`/`asd` now render in the one format
+  that actually survives `simple_pe_pipe`'s real config-file handling --
+  a brace-wrapped, comma-separated `{IFO:value,IFO:value}` string, with
+  channel names *not* repeating the `IFO:` prefix already used as the
+  dict key. `simple_pe_pipe --help` describes these as space-separated
+  CLI tokens (`nargs='+'`), which is what the previous two attempts at
+  this fix used -- but that only describes real command-line invocation.
+  Reading the real installed `simple_pe_pipe` source (dumped in CI, since
+  `git.ligo.org` isn't reachable from where this plugin is authored)
+  showed its config-file handling is actually
+  `pesummary.core.cli.actions.ConfigAction`, which does its own separate,
+  ad-hoc ini-to-dict parsing (`dict_from_str()`) wherever a value
+  contains `:` or `{`, entirely bypassing argparse's own nargs/type
+  machinery for ini-sourced values. Confirmed directly against the real,
+  installed `pesummary` package (a `simple-pe` dependency, and public on
+  PyPI, unlike `simple-pe` itself) that `dict_from_str()` requires the
+  brace-wrapped form and cannot handle a colon *inside* a value at all --
+  matching `--help`'s own example (`H1:HWINJ_INJECTED`, not
+  `H1:H1:HWINJ_INJECTED`) once actually read literally. Every other
+  config key (`trigger_time`, `trigger_parameters`, `outdir`, `f_low`,
+  `f_high`, `approximant`, `accounting_group`, `accounting_group_user`,
+  `generate_corner`) was already correct, confirmed by `simple_pe_pipe`'s
+  own printed argument `Namespace` in CI.
 
 ### Added
 - Initial release of the `asimov-simplepe` plugin, integrating
