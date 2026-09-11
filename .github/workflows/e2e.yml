@@ -75,9 +75,21 @@ jobs:
       # own `aLIGOZeroDetHighPower` analytic model -- pycbc is already
       # installed here as a simple-pe dependency -- rather than committing
       # a static data file to the repo.
+      #
+      # Written under $GITHUB_WORKSPACE/e2e_project, not /tmp: a real e2e
+      # run confirmed the `filter` DAG node (unlike `datafind`, which
+      # declares `universe = "local"` and so shares the submit host's
+      # normal filesystem) can't see /tmp at all --
+      # `FileNotFoundError: /tmp/aLIGO_asd.txt not found.` -- consistent
+      # with HTCondor's default (non-local-universe) jobs running in a
+      # sandboxed execute directory that doesn't include /tmp. Every
+      # other input file this plugin/simple_pe_pipe uses already lives
+      # under the project's own working directory tree and is read by
+      # those same jobs without issue, so this file goes there too.
       - name: Generate a real ASD file for the e2e test
         run: |
           python3 - <<'PYEOF'
+          import os
           import numpy as np
           from pycbc.psd import aLIGOZeroDetHighPower
 
@@ -91,11 +103,12 @@ jobs:
           asd = np.sqrt(psd.numpy())
 
           mask = freqs >= low_freq_cutoff
-          np.savetxt("/tmp/aLIGO_asd.txt", np.column_stack([freqs[mask], asd[mask]]))
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "e2e_project", "aLIGO_asd.txt")
+          np.savetxt(path, np.column_stack([freqs[mask], asd[mask]]))
           PYEOF
-          chmod a+r /tmp/aLIGO_asd.txt
+          chmod a+r "$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt"
           echo "--- head of generated ASD file ---"
-          head -5 /tmp/aLIGO_asd.txt
+          head -5 "$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt"
 
       - name: Set up git
         run: |

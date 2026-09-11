@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- e2e test: the generated ASD file now lives under
+  `$GITHUB_WORKSPACE/e2e_project`, not `/tmp` -- confirmed directly via a
+  real e2e run: the `filter` DAG node crashed with `FileNotFoundError:
+  /tmp/aLIGO_asd.txt not found.`, unlike `datafind` (which declares
+  `universe = "local"` and so shares the submit host's normal
+  filesystem), consistent with HTCondor's default (non-local-universe)
+  jobs running in a sandboxed execute directory that doesn't include
+  `/tmp`. Every other input file this plugin/`simple_pe_pipe` uses
+  already lives under the project's own working directory tree and is
+  read by those same jobs without issue.
 - `.github/actions/setup-simplepe-env` re-pins `numpy<2` (see "Fixed"
   below for the earlier attempt that was reverted). A real e2e run
   against `GWOSC` mode (after the `peak_finder`/`trigger_parameters.json`
