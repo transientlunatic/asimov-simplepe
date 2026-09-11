@@ -1,8 +1,8 @@
 # Test blueprint for the real Simple-PE production under test. Its ini is
 # rendered from asimov_simplepe's bundled config_template (see e2e.yml),
 # using a simulated analytic ASD (aLIGOZeroDetHighPower) via `data.asd` so
-# the run doesn't need real strain data or datafind access. Deliberately
-# single-detector to keep runtime low.
+# the run doesn't need real strain data or datafind access. Two detectors,
+# not one -- see fake_event.yaml's comment for why that matters here.
 kind: analysis
 name: simplepe-test
 pipeline: simplepe
@@ -21,10 +21,13 @@ trigger:
 likelihood:
   minimum frequency:
     H1: 20
+    L1: 20
 data:
   channels:
     H1: H1:FAKE-STRAIN
+    L1: L1:FAKE-STRAIN
   asd:
     H1: aLIGOZeroDetHighPower
+    L1: aLIGOZeroDetHighPower
 scheduler:
   accounting group: ligo.dev.o4.cbc.pe.simple_pe

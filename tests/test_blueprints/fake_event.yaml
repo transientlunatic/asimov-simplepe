@@ -1,11 +1,18 @@
 # A minimal event for the asimov-simplepe end-to-end test. The production
 # under test runs against a simulated analytic ASD (aLIGOZeroDetHighPower),
 # so this doesn't need real GWOSC metadata, strain data, or the separate
-# asimov-gwdata plugin.
+# asimov-gwdata plugin. Two interferometers: a real bug this e2e test
+# caught was simple_pe_pipe's own `--channels`/`--asd` argument-list
+# builder silently leaving a *single* `IFO:VALUE` token as a plain string
+# instead of building the dict its own code expects (`AttributeError:
+# 'str' object has no attribute 'items'`) -- confirmed directly against a
+# real single-detector run. Multiple tokens is also simple-pe's realistic
+# use case (its triangulation/localization needs more than one detector).
 kind: event
 name: FAKE_SIMPLEPE_TEST_EVENT
 interferometers:
 - H1
+- L1
 event time: 1126259462.4
 waveform:
   approximant: IMRPhenomD
