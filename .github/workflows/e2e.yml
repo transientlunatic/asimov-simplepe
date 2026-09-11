@@ -63,6 +63,31 @@ jobs:
         run: |
           simple_pe_pipe --help || true
 
+      # A real e2e run against `data.channels.<IFO>: INJ` (the documented
+      # magic value for "simulate an injection, don't read real strain
+      # data") crashed the DAG's datafind node with
+      # `TypeError: stat: path should be string, bytes, os.PathLike or
+      # integer, not NoneType` at
+      # `simple_pe/cli/simple_pe_datafind.py:648: if not
+      # os.path.isfile(opts.injection):` -- `--injection` defaults to
+      # `None` (confirmed from --help above) and that line doesn't guard
+      # against `None` before calling `os.path.isfile()` on it. This means
+      # INJ mode needs a real `--injection` JSON file passed in, but
+      # `--help` doesn't document that file's required schema ("A json
+      # file giving the injection parameters of a signal you wish to
+      # inject"), so dump the real source around every `injection`
+      # reference here rather than guessing its keys.
+      - name: Dump simple_pe_datafind source for diagnostics
+        run: |
+          SRC=$(python3 -c "import simple_pe.cli.simple_pe_datafind as m; print(m.__file__)")
+          echo "--- $SRC ---"
+          grep -n -i injection "$SRC" || true
+          echo "--- context around each injection reference ---"
+          grep -n -i injection "$SRC" | cut -d: -f1 | while read -r ln; do
+            echo "==== line $ln ===="
+            sed -n "$((ln>15?ln-15:1)),$((ln+15))p" "$SRC"
+          done
+
       - name: Set up git
         run: |
           su - submituser <<SUBMITUSER
