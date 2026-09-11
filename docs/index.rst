@@ -38,8 +38,9 @@ conda-forge, so install it from its GitLab repository (it depends on ``pycbc`` a
 .. code-block:: bash
 
    conda install -c conda-forge pycbc lalsuite
-   pip install "setuptools<82"  # see the pkg_resources note below
-   pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
+   echo "setuptools<82" > constraints.txt  # see the pkg_resources note below
+   pip install -c constraints.txt "setuptools<82"
+   pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
    pip install asimov-simplepe
 
 From source:
@@ -47,8 +48,9 @@ From source:
 .. code-block:: bash
 
    conda install -c conda-forge pycbc lalsuite
-   pip install "setuptools<82"  # see the pkg_resources note below
-   pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
+   echo "setuptools<82" > constraints.txt  # see the pkg_resources note below
+   pip install -c constraints.txt "setuptools<82"
+   pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
    git clone https://github.com/transientlunatic/asimov-simplepe.git
    cd asimov-simplepe
    pip install -e ".[docs,test]"
@@ -71,8 +73,13 @@ From source:
    81.0.0 still provides it, 82.0.0 doesn't), so ``simple_pe_pipe`` fails
    to even import with ``ModuleNotFoundError: No module named
    'pkg_resources'`` against an unpinned (or too-recent) ``setuptools`` --
-   confirmed directly via this plugin's own end-to-end CI run. Pin
-   ``setuptools<82`` first, as shown above, to work around it.
+   confirmed directly via this plugin's own end-to-end CI run. A bare
+   ``pip install "setuptools<82"`` isn't enough on its own, either:
+   installing ``simple-pe`` in a *separate* ``pip install`` right after it
+   can silently re-resolve ``setuptools`` back past 82 as one of its own
+   transitive dependencies (also confirmed directly). A constraints file
+   applied to both commands, as shown above, is what actually holds the
+   pin.
 
 Tutorial: from a fresh project to posterior samples
 ----------------------------------------------------

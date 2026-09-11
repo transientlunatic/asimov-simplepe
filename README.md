@@ -53,8 +53,9 @@ available from conda-forge):
 
 ```bash
 conda install -c conda-forge pycbc lalsuite
-pip install "setuptools<82"  # see note below
-pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
+echo "setuptools<82" > constraints.txt  # see note below
+pip install -c constraints.txt "setuptools<82"
+pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
 ```
 
 > **`pkg_resources` note.** `simple_pe_pipe` imports `pycbc.waveform`, which
@@ -65,8 +66,12 @@ pip install git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
 > it, 82.0.0 doesn't), so `simple_pe_pipe` fails to even import with
 > `ModuleNotFoundError: No module named 'pkg_resources'` against an
 > unpinned (or too-recent) `setuptools` -- confirmed directly via this
-> plugin's own CI. Pinning `setuptools<82` first (as above) works around
-> it.
+> plugin's own CI. A bare `pip install "setuptools<82"` isn't enough on
+> its own, either: installing `simple-pe` in a *separate* `pip install`
+> right after it can silently re-resolve `setuptools` back past 82 as one
+> of its own transitive dependencies (also confirmed directly). A
+> constraints file applied to both commands, as above, is what actually
+> holds the pin.
 
 > **A note on the config schema below.** `simple_pe_pipe`'s ini format
 > isn't fully documented publicly. The keys used by this plugin's bundled
