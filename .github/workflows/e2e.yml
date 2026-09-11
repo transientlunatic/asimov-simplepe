@@ -93,6 +93,25 @@ jobs:
           echo "--- $IOSRC ---"
           LN=$(grep -n "^def load_psd_from_file" "$IOSRC" | head -1 | cut -d: -f1)
           sed -n "${LN},$((LN+60))p" "$IOSRC"
+          echo "--- simple_pe.io.io.estimate_data_length_from_template_parameters source"
+          echo "    (a prior real e2e run crashed here: TypeError: only 0-dimensional arrays"
+          echo "    can be converted to Python scalars, at"
+          echo "    'return max(int(2**(np.ceil(np.log2(wf_len)))), minimum_data_length)') ---"
+          LN=$(grep -n "^def estimate_data_length_from_template_parameters" "$IOSRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+40))p" "$IOSRC"
+          echo "--- simple_pe.io.io.load_strain_data_from_file source (the caller on the"
+          echo "    crashing path: write_converted_injection_parameters -> load_strain_data_from_file"
+          echo "    -> estimate_data_length_from_template_parameters, vs the OTHER, successful"
+          echo "    call to the same function earlier in main()) ---"
+          LN=$(grep -n "^def load_strain_data_from_file" "$IOSRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+40))p" "$IOSRC"
+          echo "--- simple_pe_datafind.py write_converted_injection_parameters source (the"
+          echo "    crash's immediate caller) ---"
+          LN=$(grep -n "^def write_converted_injection_parameters" "$SRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+90))p" "$SRC"
+          echo "--- where SimplePESamples is imported from (injection_parameters gets"
+          echo "    wrapped in this before the crashing call) ---"
+          grep -n "SimplePESamples" "$SRC" || true
 
       # `--asd`/`--psd` are real file paths, not analytic-model names --
       # confirmed directly from `--help` ("ASD files to use for the
