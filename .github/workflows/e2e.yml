@@ -250,8 +250,19 @@ jobs:
           # dumped step script, where a comma-joined list here was
           # silently treated as one single, never-matching literal
           # pattern (every poll logged "0/1 patterns matched").
+          #
+          # `directory` points at .../simplepe-test/output, not
+          # .../simplepe-test itself: wait-for-files matches patterns
+          # directly inside `directory` (non-recursively), and
+          # `simple_pe_analysis` writes peak_parameters.json/
+          # peak_snrs.json into its own `output/` subdirectory, not the
+          # rundir root -- confirmed directly from a real e2e run, whose
+          # post-timeout `ls -R` dump showed both files present the
+          # entire time, under output/, while this step polled "0/2
+          # patterns matched" for the full 600s because it was only ever
+          # looking in the parent directory.
           patterns: "peak_parameters.json peak_snrs.json"
-          directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test"
+          directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/output"
           timeout: "600"
           interval: "10"
           working-directory: "e2e_project"

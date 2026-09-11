@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- e2e test: the "wait for real analysis output" step's `directory` now
+  points at `.../simplepe-test/output`, not `.../simplepe-test` itself.
+  `wait-for-files` matches patterns directly inside `directory`
+  (non-recursively), but `simple_pe_analysis` writes
+  `peak_parameters.json`/`peak_snrs.json` into its own `output/`
+  subdirectory -- confirmed directly via a real e2e run: the step timed
+  out after the full 600s logging "0/2 patterns matched" throughout,
+  while its own post-timeout `ls -R` dump showed both files present in
+  `output/` the entire time.
 - e2e test: the completion criterion is now "real `peak_parameters.json`/
   `peak_snrs.json` written by the `analysis` DAG node", not "a posterior
   samples file exists" / "the production reaches `status: finished`".
