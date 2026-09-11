@@ -69,13 +69,19 @@ runs:
         # open upstream). setuptools removed the bundled `pkg_resources`
         # module starting with 82.0.0 (confirmed directly: 81.0.0 still
         # provides it, 82.0.0 raises `ModuleNotFoundError: No module named
-        # 'pkg_resources'` -- and that exact traceback is what a real
-        # `simple_pe_pipe` invocation produced against an unpinned
-        # setuptools before this line was added), so the latest setuptools
-        # a plain `pip install setuptools` resolves to today no longer
-        # works here. Pin below that boundary.
-        "$CONDA_PYTHON" -m pip install "setuptools<82"
-        "$CONDA_PYTHON" -m pip install "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
+        # 'pkg_resources'`), so it must stay pinned below that boundary.
+        # A separate `pip install "setuptools<82"` command followed by a
+        # separate `pip install simple-pe` does NOT survive: confirmed
+        # directly that pip re-resolves setuptools back up to latest as a
+        # transitive dependency of the second install, silently undoing
+        # the pin from the first. A constraints file (applied to every pip
+        # invocation in this environment, including asimov-simplepe's own
+        # install below) is what actually holds the pin across installs.
+        echo "setuptools<82" > /tmp/simple-pe-constraints.txt
+        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "setuptools<82"
+        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
+        echo "Installed setuptools at: $("$CONDA_PYTHON" -c 'import setuptools; print(setuptools.__version__)')"
+        "$CONDA_PYTHON" -c 'import pkg_resources' && echo "pkg_resources importable: yes" || (echo "::error::pkg_resources is not importable after the setuptools<82 pin" && exit 1)
         echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
 
     - name: Install asimov-simplepe from source
@@ -85,7 +91,14 @@ runs:
         CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
         CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
         "$CONDA_PYTHON" -m ensurepip --upgrade
-        "$CONDA_PYTHON" -m pip install --force-reinstall -e ".[test]"
+        # Re-applies the same setuptools<82 constraint as the simple-pe
+        # install step above (see its comment) -- this install is
+        # unconditional (unlike that one, which is skipped on a conda-env
+        # cache hit), and without the constraint here too, installing this
+        # package's own dependencies could just as easily re-resolve
+        # setuptools back past the pkg_resources removal boundary.
+        echo "setuptools<82" > /tmp/simple-pe-constraints.txt
+        "$CONDA_PYTHON" -m pip install --force-reinstall -c /tmp/simple-pe-constraints.txt -e ".[test]"
         # Regular (non-editable) installs set explicit, world-readable
         # permissions from the wheel's RECORD; an editable install's
         # metadata (entry_points.txt etc.) is instead written fresh by pip
