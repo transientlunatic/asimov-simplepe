@@ -151,11 +151,37 @@ jobs:
       - name: Wait for real posterior samples
         uses: etive-io/actions/wait-for-files@v1
         with:
-          patterns: "*posterior*.h5,*posterior*.dat,*samples*.h5,*samples*.dat"
+          # Space-separated, not comma-separated: wait-for-files' own
+          # script only splits its `patterns` input on whitespace
+          # (`tr ' \t' '\n'`) -- confirmed directly from a real run's
+          # dumped step script, where a comma-joined list here was
+          # silently treated as one single, never-matching literal
+          # pattern (every poll logged "0/1 patterns matched").
+          patterns: "*posterior*.h5 *posterior*.dat *samples*.h5 *samples*.dat"
           directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test"
           timeout: "600"
           interval: "10"
           working-directory: "e2e_project"
+
+      # Unconditional (not just on failure): a real run got this far and
+      # only ever produced datafind_*.{error,output,log} -- the DAG's
+      # engine/analysis node never started producing output in the
+      # allotted time. Dumping DAGMan's own log and the datafind node's
+      # output here means the *reason* shows up directly in this job's
+      # log, rather than only in the on-failure artifact upload (which
+      # needs a separate download-and-unzip round trip to read at all).
+      - name: Dump DAGMan and node logs for diagnostics
+        if: always()
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project/working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test
+            for f in submit/*.dag.dagman.out submit/*.dag.nodes.log log/*.log output/*.output error/*.error; do
+              if [ -e "$f" ]; then
+                echo "--- $f ---"
+                cat "$f"
+              fi
+            done
 
       - name: Run asimov monitor for the Simple-PE production
         uses: etive-io/actions/run-asimov-command@v1
