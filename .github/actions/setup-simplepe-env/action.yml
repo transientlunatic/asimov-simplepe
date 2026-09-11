@@ -1,0 +1,88 @@
+name: 'Setup asimov-simplepe Environment'
+description: 'Install asimov-simplepe (and its asimov + simple-pe dependencies) with conda'
+inputs:
+  python-version:
+    description: 'Python version to use'
+    default: '3.11'
+    required: false
+  conda-packages:
+    description: 'Path to conda packages file; set to empty string to skip heavy conda packages'
+    default: 'conda/packages.txt'
+    required: false
+  simple-pe-ref:
+    description: 'git.ligo.org simple-pe ref (branch/tag/commit) to install'
+    default: 'main'
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Cache conda packages and pip
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/share/miniconda/pkgs
+          ~/.cache/pip
+        key: conda-${{ runner.os }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml') }}
+        restore-keys: |
+          conda-${{ runner.os }}-
+
+    - name: Set up conda environment
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniconda-version: "latest"
+        auto-activate-base: false
+        python-version: ${{ inputs.python-version }}
+        activate-environment: asimov
+        channels: conda-forge
+        use-mamba: true
+
+    - name: Cache asimov-simplepe conda env
+      id: cache-env
+      uses: actions/cache@v4
+      with:
+        path: /usr/share/miniconda/envs/asimov
+        key: conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-${{ inputs.simple-pe-ref }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml') }}
+        restore-keys: |
+          conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-
+
+    - name: Install conda dependencies (PyCBC, LALSuite)
+      # simple-pe itself has no conda-forge or PyPI package -- it's installed
+      # separately, straight from its GitLab repository, in the next step.
+      # PyCBC and LALSuite are its runtime dependencies.
+      if: steps.cache-env.outputs.cache-hit != 'true' && inputs.conda-packages != ''
+      shell: bash -el {0}
+      run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+        conda install -y -n asimov --file ${{ inputs.conda-packages }}
+
+    - name: Install simple-pe from GitLab
+      if: steps.cache-env.outputs.cache-hit != 'true'
+      shell: bash -el {0}
+      run: |
+        CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
+        CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
+        "$CONDA_PYTHON" -m ensurepip --upgrade
+        "$CONDA_PYTHON" -m pip install "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
+        echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
+
+    - name: Install asimov-simplepe from source
+      shell: bash -e {0}
+      run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+        CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
+        CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
+        "$CONDA_PYTHON" -m ensurepip --upgrade
+        "$CONDA_PYTHON" -m pip install --force-reinstall -e ".[test]"
+        # Regular (non-editable) installs set explicit, world-readable
+        # permissions from the wheel's RECORD; an editable install's
+        # metadata (entry_points.txt etc.) is instead written fresh by pip
+        # subject to the current process umask. This step runs as root, and
+        # under a restrictive root umask the resulting dist-info can end up
+        # unreadable by `submituser` -- which silently drops this package's
+        # `asimov.pipelines` entry point (asimov's own plugin loader catches
+        # and swallows the failure) rather than erroring here. Force
+        # everything world-readable so submituser can always see it.
+        chmod -R a+rX "$CONDA_BASE/envs/asimov"
+        echo "Installed asimov-simplepe from: $("$CONDA_PYTHON" -c 'import asimov_simplepe; print(asimov_simplepe.__file__)')"
+        echo "Installed asimov from: $("$CONDA_PYTHON" -c 'import asimov; print(asimov.__file__)')"
+        echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"

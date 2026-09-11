@@ -1,0 +1,217 @@
+name: End-to-end test (real simple_pe_pipe)
+
+on:
+  push:
+    branches: ['**']
+    tags: ['*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: "Simple-PE end-to-end test (HTCondor)"
+    runs-on: ubuntu-latest
+    # See tests/README-e2e note below and the "Dump simple_pe_pipe --help"
+    # step: simple_pe_pipe's exact CLI/ini schema isn't fully documented
+    # publicly, so this job is deliberately bounded rather than left to a
+    # default multi-hour ceiling if an assumption about its behaviour turns
+    # out to be wrong (e.g. it hangs waiting on real GWOSC/datafind access
+    # instead of using the simulated ASD this test configures).
+    timeout-minutes: 30
+    container:
+      image: htcondor/mini:latest
+      options: --privileged
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: etive-io/actions/setup-htcondor@v1
+
+      - name: Install base tools
+        run: |
+          yum install -y sudo git
+
+      - name: Create submit user
+        uses: etive-io/actions/create-submit-user@v1
+
+      - name: Ensure submituser can access workspace
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/e2e_project"
+          chmod -R a+rwX "$GITHUB_WORKSPACE"
+
+      - name: Setup asimov-simplepe Environment
+        uses: ./.github/actions/setup-simplepe-env
+        with:
+          python-version: "3.11"
+
+      # simple_pe_pipe's real CLI/ini schema isn't fully documented
+      # publicly; this plugin's config_template and build_dag() are a
+      # best-effort match against simple-pe's own public documentation and
+      # issue tracker (see README's Compatibility note). Dumping --help
+      # unconditionally (not gated on anything downstream succeeding) means
+      # a wrong assumption shows up here, in the log, rather than only as
+      # an opaque downstream failure.
+      - name: Dump simple_pe_pipe --help for diagnostics
+        run: |
+          simple_pe_pipe --help || true
+
+      - name: Set up git
+        run: |
+          su - submituser <<SUBMITUSER
+          set -euo pipefail
+          git config --global init.defaultBranch master
+          git config --global user.email "you@example.com"
+          git config --global user.name "Your Name"
+          SUBMITUSER
+
+      - name: Create asimov project
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: cd e2e_project && asimov init "E2E Test Project"
+
+      - name: Configure asimov environment and condor user
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            if [ -z "$CONDA_PREFIX" ] || [ ! -x "$CONDA_PREFIX/bin/simple_pe_pipe" ]; then
+              echo "::error::CONDA_PREFIX ('$CONDA_PREFIX') does not contain bin/simple_pe_pipe" >&2
+              exit 1
+            fi
+            asimov configuration update pipelines/environment "$CONDA_PREFIX"
+            asimov configuration update condor/user submituser
+
+      - name: Diagnose asimov.pipelines entry-point discovery as submituser
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            python3 -c "
+            from importlib.metadata import entry_points
+            eps = [ep for ep in entry_points(group='asimov.pipelines') if ep.value.startswith('asimov_simplepe')]
+            print('Discovered asimov_simplepe entry points:', eps)
+            for ep in eps:
+                try:
+                    ep.load()
+                    print(f'  {ep.name}: loaded OK')
+                except Exception as e:
+                    print(f'  {ep.name}: FAILED TO LOAD: {e!r}')
+            "
+
+      - name: Apply fake event
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            asimov apply -f "$GITHUB_WORKSPACE/tests/test_blueprints/fake_event.yaml"
+
+      # This exercises the real plugin end to end, including its own
+      # config_template rendering and before_config() trigger-parameters
+      # generation -- unlike the sibling asimov-pycbc/asimov-lalinference
+      # e2e tests, which pre-seed a hand-validated ini (something that
+      # would require running the real simple_pe_pipe interactively first,
+      # which isn't possible in the environment this plugin was authored
+      # in -- see README's Compatibility note). A simulated ASD
+      # (aLIGOZeroDetHighPower) is requested via `data.asd`, matching the
+      # confirmed `asd` config key, so no real strain data or datafind
+      # access should be required if that key behaves as documented.
+      - name: Add and build the real Simple-PE production
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            asimov apply -f "$GITHUB_WORKSPACE/tests/test_blueprints/simplepe_production.yaml" -e FAKE_SIMPLEPE_TEST_EVENT
+            asimov manage build submit
+
+      - name: Inspect the rendered config and generated DAG
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            echo "--- rendered ini ---"
+            find checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses -maxdepth 1
+            cat checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses/simplepe-test.ini || true
+            echo "--- rundir ---"
+            find working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test -maxdepth 2 || true
+            echo "--- trigger_parameters.ini ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/trigger_parameters.ini || true
+
+      # This is the real completion criterion asimov_simplepe's
+      # detect_completion() checks for -- not a smoke-test proxy. Reaching
+      # it means simple_pe_pipe genuinely built a working DAG, HTCondor
+      # genuinely ran it, and it produced a real, parseable posterior
+      # samples file.
+      - name: Wait for real posterior samples
+        uses: etive-io/actions/wait-for-files@v1
+        with:
+          patterns: "*posterior*.h5,*posterior*.dat,*samples*.h5,*samples*.dat"
+          directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test"
+          timeout: "600"
+          interval: "10"
+          working-directory: "e2e_project"
+
+      - name: Run asimov monitor for the Simple-PE production
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: cd e2e_project && asimov monitor
+
+      - name: Verify a posterior samples file is genuinely readable
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            python3 -c "
+            import glob
+            import os
+
+            candidates = []
+            for pattern in ('posterior_samples.h5', 'posterior_samples.dat', '*posterior*.h5', '*posterior*.dat', '*samples*.h5', '*samples*.dat'):
+                candidates += glob.glob(os.path.join('working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test', '**', pattern), recursive=True)
+                if candidates:
+                    break
+            assert candidates, 'No posterior samples file found'
+            path = sorted(candidates)[0]
+            print('Found posterior file:', path)
+            if path.endswith('.h5') or path.endswith('.hdf5'):
+                import h5py
+                with h5py.File(path, 'r') as f:
+                    assert len(f.keys()) > 0, 'Posterior file has no top-level groups'
+                    print('Posterior file groups:', list(f.keys()))
+            else:
+                assert os.path.getsize(path) > 0, 'Posterior file is empty'
+            "
+
+      - name: Confirm the Simple-PE production reached a finished status
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            python3 -c "
+            import yaml
+            with open('.asimov/ledger.yml') as f:
+                ledger = yaml.safe_load(f)
+            event = next(e for e in ledger['events'] if e['name'] == 'FAKE_SIMPLEPE_TEST_EVENT')
+            production = next(p['simplepe-test'] for p in event['productions'] if 'simplepe-test' in p)
+            status = production.get('status')
+            print('simplepe-test status:', status)
+            assert status == 'finished', f'Unexpected status: {status}'
+            "
+
+      - name: Archive artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-debug
+          path: |
+            e2e_project/.asimov/
+            e2e_project/working/
+            e2e_project/checkouts/
+            e2e_project/pages/
+          retention-days: 5

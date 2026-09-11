@@ -1,0 +1,30 @@
+# Test blueprint for the real Simple-PE production under test. Its ini is
+# rendered from asimov_simplepe's bundled config_template (see e2e.yml),
+# using a simulated analytic ASD (aLIGOZeroDetHighPower) via `data.asd` so
+# the run doesn't need real strain data or datafind access. Deliberately
+# single-detector to keep runtime low.
+kind: analysis
+name: simplepe-test
+pipeline: simplepe
+comment: Simple-PE end-to-end test production (simulated noise)
+status: ready
+trigger:
+  mass1: 36
+  mass2: 29
+  spin1z: 0.0
+  spin2z: 0.0
+  ra: 1.95
+  dec: -1.27
+  distance: 440
+  phase: 0
+  psi: 0
+likelihood:
+  minimum frequency:
+    H1: 20
+data:
+  channels:
+    H1: H1:FAKE-STRAIN
+  asd:
+    H1: aLIGOZeroDetHighPower
+scheduler:
+  accounting group: ligo.dev.o4.cbc.pe.simple_pe

@@ -1,0 +1,17 @@
+# Reference blueprint for chaining a PESummary post-processing production
+# onto a real Simple-PE production via `needs:` (see the Post-processing
+# section of docs/index.rst). Not currently wired into e2e.yml -- the base
+# simplepe-test e2e (this plugin's own build_dag/submit_dag/detect_completion
+# path) is exercised first; chaining a full asimov-pesummary hand-off here
+# is left for a follow-up once that's confirmed working against a real
+# simple_pe_pipe release (see README's Compatibility note).
+kind: analysis
+name: simplepe-test-pesummary
+pipeline: pesummary
+comment: PESummary post-processing production, consuming simplepe-test's samples via a needs dependency
+status: ready
+needs:
+  - simplepe-test
+postprocessing:
+  pesummary:
+    multiprocess: 2
