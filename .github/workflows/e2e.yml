@@ -63,6 +63,37 @@ jobs:
         run: |
           simple_pe_pipe --help || true
 
+      # A real e2e run's generated .dag file contained only a single
+      # `datafind` job -- no metric/peak-find, corner-plot, or PESummary
+      # node -- despite `--help` documenting that PESummary post-processing
+      # runs by default (no `--disable_pesummary` passed) and this ini
+      # setting `generate_corner = True` (which should run
+      # `simple_pe_corner` per --help). Dump simple_pe_pipe's own DAG-
+      # building source (the actual `simple_pe_pipe` script/module, not
+      # simple_pe_datafind) to see what really determines the DAG's node
+      # set, rather than guessing at a missing flag.
+      - name: Dump simple_pe_pipe DAG-building source for diagnostics
+        run: |
+          PIPE_EXE=$(command -v simple_pe_pipe)
+          echo "--- $PIPE_EXE (entry script) ---"
+          cat "$PIPE_EXE" || true
+          PIPE_MOD=$(python3 -c "
+          import runpy, re
+          with open('$PIPE_EXE') as f:
+              src = f.read()
+          m = re.search(r'from (simple_pe[\w.]*) import', src) or re.search(r'^import (simple_pe[\w.]*)', src, re.M)
+          print(m.group(1) if m else '')
+          ")
+          echo "--- resolved module: $PIPE_MOD ---"
+          if [ -n "$PIPE_MOD" ]; then
+            PIPE_SRC=$(python3 -c "import importlib; m = importlib.import_module('$PIPE_MOD'); print(m.__file__)")
+            echo "--- $PIPE_SRC ---"
+            echo "--- top-level def/class outline ---"
+            grep -n "^def \|^class " "$PIPE_SRC" || true
+            echo "--- lines mentioning corner/pesummary/convert_samples/JOB/dag ---"
+            grep -n -i "corner\|pesummary\|convert_samples\|\.dag\b\|add_job\|write_dag\|CondorDAG\|dax" "$PIPE_SRC" || true
+          fi
+
       # A real e2e run against `data.channels.<IFO>: INJ` (the documented
       # magic value for "simulate an injection, don't read real strain
       # data") crashed the DAG's datafind node with
