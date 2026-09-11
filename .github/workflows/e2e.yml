@@ -175,8 +175,8 @@ jobs:
             cat checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses/simplepe-test.ini || true
             echo "--- rundir ---"
             find working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test -maxdepth 2 || true
-            echo "--- trigger_parameters.ini ---"
-            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/trigger_parameters.ini || true
+            echo "--- trigger_parameters.json ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/trigger_parameters.json || true
             # A prior real run showed the datafind node completing with exit
             # status 0 (real GWOSC data fetched successfully for both H1 and
             # L1) and DAGMan itself EXITING WITH STATUS 0 -- but the DAG only

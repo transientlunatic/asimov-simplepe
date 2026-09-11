@@ -19,7 +19,7 @@ seed for a more detailed run. This plugin enables Asimov to build and submit
 - **Configuration templating**: renders a `simple_pe_pipe` config file from
   a bundled Liquid template, populated from a production's ledger metadata
   (`config_template`), for use by `asimov manage build`.
-- **Trigger-parameter seeding**: writes the small `trigger_parameters.ini`
+- **Trigger-parameter seeding**: writes the small `trigger_parameters.json`
   file `simple_pe_pipe` uses to seed its local optimisation, before the
   main config is rendered.
 - **DAG generation and scheduler integration**: `simple_pe_pipe` builds a

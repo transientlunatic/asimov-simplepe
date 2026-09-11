@@ -14,7 +14,6 @@ sibling): shell out to build a DAG, then submit it through Asimov's own
 scheduler abstraction rather than talking to HTCondor/Slurm directly.
 """
 
-import configparser
 import glob
 import importlib.resources
 import json
@@ -85,13 +84,25 @@ class SimplePE(Pipeline):
 
     def _trigger_parameters_file(self):
         """
-        The path to the small ini file listing the approximate trigger
+        The path to the small JSON file listing the approximate trigger
         parameters (masses, spins, sky location, ...) that seeds
         ``simple_pe_pipe``'s local optimisation -- referenced by the
         ``trigger_parameters`` key in the main config
         (``configs/simplepe.ini``).
+
+        A JSON file, not an ini file: confirmed directly from
+        ``simple_pe_filter``'s real source
+        (``simple_pe.io.io.load_trigger_parameters_from_file()``), which
+        does ``json.load(f)`` then ``pe.SimplePESamples(data)`` on
+        whatever ``--trigger_parameters`` points at, and requires
+        (case-sensitive, underscored LIGO convention) ``mass_1``,
+        ``mass_2``, ``spin_1z``, ``spin_2z`` and ``time`` keys -- an
+        earlier ini-format version of this file crashed the real
+        ``filter`` DAG node with
+        ``json.decoder.JSONDecodeError: Expecting value: line 1 column 2
+        (char 1)``, confirmed via this plugin's own e2e CI.
         """
-        return os.path.join(self.production.rundir, "trigger_parameters.ini")
+        return os.path.join(self.production.rundir, "trigger_parameters.json")
 
     def _injection_parameters_file(self):
         """
@@ -201,24 +212,20 @@ class SimplePE(Pipeline):
         """
         self._ensure_rundir()
         trigger = self.production.meta.get("trigger", {})
-        parser = configparser.RawConfigParser()
-        parser.add_section("parameters")
         values = {
+            "mass_1": trigger.get("mass1", 1.4),
+            "mass_2": trigger.get("mass2", 1.4),
+            "spin_1z": trigger.get("spin1z", 0),
+            "spin_2z": trigger.get("spin2z", 0),
             "time": self.production.meta.get("event time", ""),
-            "mass1": trigger.get("mass1", ""),
-            "mass2": trigger.get("mass2", ""),
-            "spin1z": trigger.get("spin1z", 0),
-            "spin2z": trigger.get("spin2z", 0),
             "ra": trigger.get("ra", 0),
             "dec": trigger.get("dec", 0),
             "distance": trigger.get("distance", 400),
             "phase": trigger.get("phase", 0),
             "psi": trigger.get("psi", 0),
         }
-        for key, value in values.items():
-            parser.set("parameters", key, str(value))
         with open(self._trigger_parameters_file(), "w") as trigger_file:
-            parser.write(trigger_file)
+            json.dump(values, trigger_file)
 
         if self.uses_injection:
             self._write_injection_parameters()

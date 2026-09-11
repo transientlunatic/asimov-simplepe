@@ -57,7 +57,7 @@ class TestBeforeConfig:
 
         pipeline.before_config()
 
-        trigger_file = os.path.join(mock_production.rundir, "trigger_parameters.ini")
+        trigger_file = os.path.join(mock_production.rundir, "trigger_parameters.json")
         assert os.path.exists(trigger_file)
 
     def test_trigger_parameters_contents(self, mock_production, mock_config, temp_dir):
@@ -66,14 +66,22 @@ class TestBeforeConfig:
 
         pipeline.before_config()
 
-        from asimov.pipeline import Pipeline
-
-        parser = Pipeline.read_ini(
-            os.path.join(mock_production.rundir, "trigger_parameters.ini")
-        )
-        assert parser.get("parameters", "mass1") == "36"
-        assert parser.get("parameters", "mass2") == "29"
-        assert parser.get("parameters", "time") == "1126259462.4"
+        # JSON, not ini: confirmed directly from simple_pe_filter's real
+        # source (simple_pe.io.io.load_trigger_parameters_from_file()),
+        # which does json.load(f) then pe.SimplePESamples(data) on
+        # whatever --trigger_parameters points at, and requires
+        # (case-sensitive, underscored LIGO convention) mass_1/mass_2/
+        # spin_1z/spin_2z/time keys -- an earlier ini-format version of
+        # this file crashed the real filter DAG node with
+        # json.decoder.JSONDecodeError, confirmed via this plugin's own
+        # e2e CI.
+        with open(
+            os.path.join(mock_production.rundir, "trigger_parameters.json")
+        ) as f:
+            data = json.load(f)
+        assert data["mass_1"] == 36
+        assert data["mass_2"] == 29
+        assert data["time"] == 1126259462.4
 
     def test_trigger_parameters_defaults_when_no_trigger_meta(
         self, mock_production, mock_config, temp_dir
@@ -85,13 +93,12 @@ class TestBeforeConfig:
 
         pipeline.before_config()  # must not raise
 
-        from asimov.pipeline import Pipeline
-
-        parser = Pipeline.read_ini(
-            os.path.join(mock_production.rundir, "trigger_parameters.ini")
-        )
-        assert parser.get("parameters", "spin1z") == "0"
-        assert parser.get("parameters", "distance") == "400"
+        with open(
+            os.path.join(mock_production.rundir, "trigger_parameters.json")
+        ) as f:
+            data = json.load(f)
+        assert data["spin_1z"] == 0
+        assert data["distance"] == 400
 
     def test_ensures_rundir_exists(self, mock_production, mock_config, temp_dir):
         mock_production.rundir = os.path.join(temp_dir, "run")

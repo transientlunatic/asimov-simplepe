@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `before_config()`/`_trigger_parameters_file()`: the trigger-parameters
+  file is now written as JSON (`trigger_parameters.json`), not an ini
+  file -- confirmed directly from `simple_pe_filter`'s real source
+  (`simple_pe.io.io.load_trigger_parameters_from_file()`, dumped via
+  this plugin's own e2e CI): it does `json.load(f)` then
+  `pe.SimplePESamples(data)` on whatever `--trigger_parameters` points
+  at, and requires (case-sensitive, underscored LIGO convention)
+  `mass_1`, `mass_2`, `spin_1z`, `spin_2z` and `time` keys. The old
+  ini-format file (`configparser.RawConfigParser`, `[parameters]\nmass1
+  = 36\n...`) crashed the real `filter` DAG node -- the first node
+  downstream of `datafind` in the full analysis pipeline -- with
+  `json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char
+  1)`, confirmed via this plugin's own e2e CI once the `peak_finder` fix
+  below got that node built and run for the first time.
 - `config_template`: added `peak_finder = metric` (configurable via
   `production.meta['peak_finder']`), the actual root cause of the DAG
   containing only a `DataFindNode` job -- confirmed directly via this
@@ -160,7 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `likelihood.minimum frequency`, `scheduler.accounting group`), following
   the same `production.meta` key conventions as the sibling
   `asimov-pycbc`/`asimov-lalinference` plugins.
-- `before_config()` writes a small `trigger_parameters.ini` file (the
+- `before_config()` writes a small `trigger_parameters.json` file (the
   approximate event parameters `simple_pe_pipe` uses to seed its local
   optimisation) into the run directory before the main ini is rendered.
 - `build_dag()` shells out to `simple_pe_pipe`, which builds a real

@@ -10,7 +10,7 @@ required.
 
 **What it does**
 
-* Writes a small ``trigger_parameters.ini`` file (the approximate event parameters
+* Writes a small ``trigger_parameters.json`` file (the approximate event parameters
   ``simple_pe_pipe`` uses to seed its local optimisation), then renders a
   ``simple_pe_pipe`` config file from a production's meta-data (waveform, data,
   likelihood), using this plugin's bundled
