@@ -141,9 +141,11 @@ conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
   `injection = ...` -- `simple_pe_datafind` requires this unconditionally
   in that case (confirmed directly from its real source, via this
   plugin's own e2e CI).
-- `data.asd` -- per-interferometer amplitude spectral density: either a
-  path to an ASD file, or (for simulated-noise testing, e.g. alongside
-  `data.channels: INJ`) the name of an analytic PSD model.
+- `data.asd` -- per-interferometer path to a real, two-column (frequency,
+  ASD) text file. There is no analytic-PSD-model-name shortcut here --
+  confirmed directly from `--help` ("ASD files to use for the analysis")
+  and from this plugin's own e2e CI, which generates a real file from
+  pycbc's analytic `aLIGOZeroDetHighPower` model for its `INJ`-mode test.
 
 This means a production populated by a data-retrieval step (for example
 [asimov-gwdata](https://github.com/etive-io/asimov-gwdata)) can be picked

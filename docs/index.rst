@@ -145,8 +145,8 @@ This walks through a complete example.
           H1: INJ
           L1: INJ
         asd:
-          H1: aLIGOZeroDetHighPower
-          L1: aLIGOZeroDetHighPower
+          H1: /path/to/aLIGO_asd.txt
+          L1: /path/to/aLIGO_asd.txt
       scheduler:
         accounting group: ligo.dev.o4.cbc.pe.simple_pe
 
@@ -206,8 +206,11 @@ Data
 
 Strain data is read from a production's ``data`` meta-data. ``data.channels``
 is the channel name *without* the leading ``IFO:`` (this plugin adds that
-itself when rendering the ini); ``data.asd`` is a path to an ASD file (or an
-analytic PSD model name for simulated noise):
+itself when rendering the ini); ``data.asd`` is a path to a real, two-column
+(frequency, ASD) text file -- confirmed directly from ``--help`` ("ASD files
+to use for the analysis") and from this plugin's own e2e CI: there is no
+analytic-PSD-model-name shortcut in the CLI, it always opens whatever string
+is given as a literal file path.
 
 .. code-block:: yaml
 
@@ -224,7 +227,8 @@ confirmed directly from its own ``--help`` text: ``GWOSC``, to read public
 GWOSC open data instead of a private frame channel, and ``INJ``, to have
 ``simple_pe_pipe`` simulate an injection itself rather than reading any real
 strain data at all -- no datafind access needed. This is what this plugin's
-own end-to-end test uses, paired with a simulated analytic ASD to colour the
+own end-to-end test uses, paired with a real ASD file (generated at CI time
+from pycbc's analytic ``aLIGOZeroDetHighPower`` model) to colour the
 simulated noise. Whenever any interferometer uses ``INJ``,
 :meth:`before_config() <asimov_simplepe.simplepe.SimplePE.before_config>`
 also writes an ``injection.json`` file from the production's ``trigger``
@@ -240,7 +244,7 @@ whenever any channel is ``INJ``:
      channels:
        H1: INJ
      asd:
-       H1: aLIGOZeroDetHighPower
+       H1: /path/to/aLIGO_asd.txt
 
 Status messages
 ~~~~~~~~~~~~~~~~

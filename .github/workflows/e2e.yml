@@ -87,6 +87,46 @@ jobs:
             echo "==== line $ln ===="
             sed -n "$((ln>15?ln-15:1)),$((ln+15))p" "$SRC"
           done
+          echo "--- simple_pe.io.io.load_psd_from_file source (insurance: --asd/--psd's real"
+          echo "    required file format, in case the generated ASD file below isn't quite right) ---"
+          IOSRC=$(python3 -c "import simple_pe.io.io as m; print(m.__file__)")
+          echo "--- $IOSRC ---"
+          LN=$(grep -n "^def load_psd_from_file" "$IOSRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+60))p" "$IOSRC"
+
+      # `--asd`/`--psd` are real file paths, not analytic-model names --
+      # confirmed directly from `--help` ("ASD files to use for the
+      # analysis") and from a real e2e run: passing the analytic model name
+      # `aLIGOZeroDetHighPower` as if it were a magic value crashed with
+      # `FileNotFoundError: aLIGOZeroDetHighPower not found.` inside
+      # `numpy.loadtxt()` (via `pycbc.psd.read.from_txt()`), because
+      # `simple_pe_datafind` opens whatever string is given as a literal
+      # path. There's no built-in analytic-PSD shortcut in the CLI, so
+      # generate a real two-column (frequency, ASD) text file with pycbc's
+      # own `aLIGOZeroDetHighPower` analytic model -- pycbc is already
+      # installed here as a simple-pe dependency -- rather than committing
+      # a static data file to the repo.
+      - name: Generate a real ASD file for the e2e test
+        run: |
+          python3 - <<'PYEOF'
+          import numpy as np
+          from pycbc.psd import aLIGOZeroDetHighPower
+
+          delta_f = 0.25
+          f_high = 2048
+          low_freq_cutoff = 1.0
+          flen = int(f_high / delta_f) + 1
+
+          psd = aLIGOZeroDetHighPower(flen, delta_f, low_freq_cutoff)
+          freqs = psd.sample_frequencies.numpy()
+          asd = np.sqrt(psd.numpy())
+
+          mask = freqs >= low_freq_cutoff
+          np.savetxt("/tmp/aLIGO_asd.txt", np.column_stack([freqs[mask], asd[mask]]))
+          PYEOF
+          chmod a+r /tmp/aLIGO_asd.txt
+          echo "--- head of generated ASD file ---"
+          head -5 /tmp/aLIGO_asd.txt
 
       - name: Set up git
         run: |

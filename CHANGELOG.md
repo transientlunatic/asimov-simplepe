@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- e2e test / README / docs: `data.asd` must be a real, two-column
+  (frequency, ASD) text file -- there is no analytic-PSD-model-name
+  shortcut in `simple_pe_pipe`'s CLI, confirmed directly from `--help`
+  ("ASD files to use for the analysis") and from a real e2e run: passing
+  the model name `aLIGOZeroDetHighPower` as if it were a magic value (an
+  earlier attempt, by analogy with `data.channels: INJ`) crashed with
+  `FileNotFoundError: aLIGOZeroDetHighPower not found.` inside
+  `numpy.loadtxt()` (via `pycbc.psd.read.from_txt()`), because
+  `simple_pe_datafind` opens whatever string it's given as a literal
+  path. `.github/workflows/e2e.yml` now generates a real ASD file at CI
+  time from pycbc's own analytic `aLIGOZeroDetHighPower` model (pycbc is
+  already installed there as a simple-pe dependency) rather than
+  committing a static data file to the repository.
 - `config_template`/`before_config()`: when any interferometer's
   `data.channels` value is the `INJ` magic value, `simple_pe_pipe`'s
   `datafind` node now gets a real `--injection` JSON file. Without it,
