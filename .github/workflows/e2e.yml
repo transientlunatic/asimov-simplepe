@@ -250,67 +250,45 @@ jobs:
             echo "--- error/*.error ---"
             cat error/*.error || true
 
-      # A real e2e run's generated .dag file contained only a single
-      # `datafind` job -- no metric/peak-find, corner-plot, or PESummary
-      # node -- despite `--help` documenting that PESummary post-processing
-      # runs by default (no `--disable_pesummary` passed) and this ini
-      # setting `generate_corner = True` (which should run
-      # `simple_pe_corner` per --help). Dump simple_pe_pipe's own DAG-
-      # building source (the actual `simple_pe_pipe` script/module, not
-      # simple_pe_datafind) to see what really determines the DAG's node
-      # set, rather than guessing at a missing flag.
+      # The peak_finder fix (see asimov_simplepe/configs/simplepe.ini) got
+      # the DAG building a real multi-node pipeline (datafind -> filter ->
+      # analysis -> corner/postprocessing), but a real run then crashed
+      # the `filter` node: `json.decoder.JSONDecodeError: Expecting value:
+      # line 1 column 2 (char 1)` at `simple_pe/io/io.py:29: data =
+      # json.load(f)`, inside `load_trigger_parameters_from_file()`,
+      # called from `simple_pe_filter.py:957`. This plugin's own
+      # before_config() writes trigger_parameters.ini as an INI file
+      # (configparser.RawConfigParser, `[parameters]\nmass1 = 36\n...`),
+      # but simple_pe_filter's `--trigger_parameters` clearly expects a
+      # JSON file instead. Dump load_trigger_parameters_from_file's real
+      # source, and how simple_pe_filter.py consumes the dict it returns
+      # (key names -- likely mass_1/mass_2 like the injection.json schema,
+      # but confirm rather than guess), to fix this for real.
       #
       # A plain `run:` step (not etive-io/actions/run-asimov-command), so
       # this can freely use shell variables -- placed here, late in the
-      # job (rather than right after the --help dump, where an earlier
-      # version of this step lived), because GitHub's job-log API appears
-      # to cap how much log content this plugin's own diagnostics can
-      # retrieve, always anchored to the tail: an early step's output was
-      # confirmed to fall entirely outside that window on a real run and
-      # was unrecoverable even with a very large explicit tail_lines.
-      - name: Dump simple_pe_pipe DAG-building source for diagnostics
+      # job, because GitHub's job-log API appears to cap how much log
+      # content this plugin's own diagnostics can retrieve, always
+      # anchored to the tail: an early step's output was confirmed to
+      # fall entirely outside that window on a real run and was
+      # unrecoverable even with a very large explicit tail_lines.
+      - name: Dump trigger-parameters loading source for diagnostics
         if: always()
         run: |
-          PIPE_EXE=$(command -v simple_pe_pipe)
-          echo "--- $PIPE_EXE (entry script) ---"
-          cat "$PIPE_EXE" || true
-          PIPE_MOD=$(python3 -c "
-          import re
-          with open('$PIPE_EXE') as f:
-              src = f.read()
-          m = re.search(r'from (simple_pe[\w.]*) import', src) or re.search(r'^import (simple_pe[\w.]*)', src, re.M)
-          print(m.group(1) if m else '')
-          ")
-          echo "--- resolved module: $PIPE_MOD ---"
-          if [ -n "$PIPE_MOD" ]; then
-            PIPE_SRC=$(python3 -c "import importlib; m = importlib.import_module('$PIPE_MOD'); print(m.__file__)")
-            echo "--- $PIPE_SRC ---"
-            echo "--- top-level def/class outline ---"
-            grep -n "^def \|^class " "$PIPE_SRC" || true
-            echo "--- lines mentioning corner/pesummary/convert_samples/JOB/dag ---"
-            grep -n -i "corner\|pesummary\|convert_samples\|\.dag\b\|add_job\|write_dag\|CondorDAG\|dax" "$PIPE_SRC" || true
-            # The real question this whole diagnostic step exists to answer:
-            # every generated .dag file so far has contained only a
-            # DataFindNode job -- never an AnalysisNode/FilterNode (the
-            # actual metric/Fisher-matrix PE stage), CornerNode, or
-            # PostProcessingNode -- despite --generate_corner=True and
-            # --disable_pesummary not being passed. Dump main()'s complete
-            # body (where node creation is gated) to find the real
-            # condition controlling this, rather than guessing further.
-          fi
+          IOSRC=$(python3 -c "import simple_pe.io.io as m; print(m.__file__)")
+          echo "--- $IOSRC: load_trigger_parameters_from_file ---"
+          LN=$(grep -n "^def load_trigger_parameters_from_file" "$IOSRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+40))p" "$IOSRC"
+          FILTERSRC=$(python3 -c "import simple_pe.cli.simple_pe_filter as m; print(m.__file__)")
+          echo "--- $FILTERSRC: context around load_trigger_parameters_from_file call and use ---"
+          LN=$(grep -n "load_trigger_parameters_from_file" "$FILTERSRC" | head -1 | cut -d: -f1)
+          sed -n "${LN},$((LN+50))p" "$FILTERSRC"
+          echo "--- lines referencing trigger_parameters in simple_pe_filter.py ---"
+          grep -n "trigger_parameters\[" "$FILTERSRC" || true
 
-      # Confirmed directly from the real source (dumped above in earlier
-      # rounds): simple_pe_pipe's main() unconditionally constructs
-      # FilterNode/AnalysisNode/PostProcessingNode/CornerNode for every
-      # entry in opts.peak_finder, with no visible gate that would skip
-      # them -- yet every real .dag file produced so far contains only the
-      # DataFindNode job. asimov's own build_dag() captures
-      # simple_pe_pipe's stdout/stderr (including its `logger.info(opts)`
-      # full parsed Namespace dump and any per-node construction errors)
-      # but doesn't surface it to this CI log. Re-run simple_pe_pipe
-      # directly against the exact same already-rendered ini to see that
-      # raw output first-hand, rather than continuing to infer from
-      # source alone.
+      # Re-run simple_pe_pipe directly against the exact same
+      # already-rendered ini to see its own diagnostic output
+      # (logger.info(opts)'s full parsed Namespace dump) first-hand.
       - name: Re-run simple_pe_pipe directly to see its own diagnostic output
         if: always()
         uses: etive-io/actions/run-asimov-command@v1
