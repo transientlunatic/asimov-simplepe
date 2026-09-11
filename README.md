@@ -135,7 +135,12 @@ conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
   GWOSC open data instead of a private frame channel, and `INJ` to have
   `simple_pe_pipe` simulate an injection itself rather than reading any
   real strain data at all -- no datafind access needed (this is what
-  this plugin's own end-to-end test uses).
+  this plugin's own end-to-end test uses). When any interferometer uses
+  `INJ`, `before_config()` also writes an `injection.json` file from the
+  production's `trigger` metadata and the ini references it via
+  `injection = ...` -- `simple_pe_datafind` requires this unconditionally
+  in that case (confirmed directly from its real source, via this
+  plugin's own e2e CI).
 - `data.asd` -- per-interferometer amplitude spectral density: either a
   path to an ASD file, or (for simulated-noise testing, e.g. alongside
   `data.channels: INJ`) the name of an analytic PSD model.

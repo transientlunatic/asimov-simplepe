@@ -225,7 +225,14 @@ GWOSC open data instead of a private frame channel, and ``INJ``, to have
 ``simple_pe_pipe`` simulate an injection itself rather than reading any real
 strain data at all -- no datafind access needed. This is what this plugin's
 own end-to-end test uses, paired with a simulated analytic ASD to colour the
-simulated noise:
+simulated noise. Whenever any interferometer uses ``INJ``,
+:meth:`before_config() <asimov_simplepe.simplepe.SimplePE.before_config>`
+also writes an ``injection.json`` file from the production's ``trigger``
+metadata (masses/spins in the underscored LIGO convention
+``mass_1``/``spin_1z``/etc, plus ``distance``/``ra``/``dec``/``psi``/``time``)
+and the ini references it -- confirmed directly from
+``simple_pe_datafind``'s real source that this is required unconditionally
+whenever any channel is ``INJ``:
 
 .. code-block:: yaml
 

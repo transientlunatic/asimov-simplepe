@@ -1,5 +1,6 @@
 """Tests for the Simple-PE pipeline integration."""
 
+import json
 import os
 from unittest.mock import MagicMock, Mock, patch
 
@@ -99,6 +100,74 @@ class TestBeforeConfig:
         pipeline.before_config()
 
         assert os.path.isdir(mock_production.rundir)
+
+    def test_no_injection_file_when_channels_are_real(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # mock_production's default data.channels are real channel names
+        # (e.g. "H1:GDS-CALIB_STRAIN"), not the INJ magic value.
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        pipeline = SimplePE(mock_production)
+
+        pipeline.before_config()
+
+        assert pipeline.uses_injection is False
+        assert not os.path.exists(pipeline._injection_parameters_file())
+
+    def test_injection_file_written_when_any_channel_is_inj(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {"H1": "INJ", "L1": "INJ"},
+            "asd": {"H1": "aLIGOZeroDetHighPower", "L1": "aLIGOZeroDetHighPower"},
+        }
+        pipeline = SimplePE(mock_production)
+
+        pipeline.before_config()
+
+        assert pipeline.uses_injection is True
+        injection_file = pipeline._injection_parameters_file()
+        assert os.path.exists(injection_file)
+        with open(injection_file) as f:
+            injection = json.load(f)
+        # Masses/spins use the underscored LIGO convention -- the only keys
+        # simple_pe_datafind's get_injection_data() converts to pycbc's
+        # get_td_waveform() convention (confirmed directly from its real
+        # source); everything else, including delta_t/f_lower, already
+        # matches pycbc's own argument names and passes straight through.
+        assert injection["mass_1"] == 36
+        assert injection["mass_2"] == 29
+        assert injection["spin_1z"] == 0.0
+        assert injection["spin_2z"] == 0.0
+        assert injection["ra"] == 1.95
+        assert injection["dec"] == -1.27
+        assert injection["distance"] == 440
+        assert injection["time"] == 1126259462.4
+        assert injection["approximant"] == "IMRPhenomXPHM"
+        assert injection["f_lower"] == 20
+        # delta_t must satisfy the Nyquist limit for the default f_high
+        # (1024 Hz): simple_pe_datafind derives f_high back from delta_t
+        # as `1 / 2 / delta_t` (confirmed from its real source), so the
+        # two must stay consistent.
+        assert injection["delta_t"] == pytest.approx(1.0 / (2 * 1024))
+
+    def test_injection_file_only_needs_one_ifo_to_be_inj(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {"H1": "INJ", "L1": "L1:GDS-CALIB_STRAIN"},
+            "asd": {"H1": "aLIGOZeroDetHighPower", "L1": "/data/L1_asd.txt"},
+        }
+        pipeline = SimplePE(mock_production)
+
+        pipeline.before_config()
+
+        assert pipeline.uses_injection is True
+        assert os.path.exists(pipeline._injection_parameters_file())
 
 
 class TestBuildDag:
@@ -561,6 +630,50 @@ class TestRealConfigRendering:
         assert (
             parser.get("pipeline", "asd")
             == "{H1:/data/H1_asd.txt,L1:/data/L1_asd.txt}"
+        )
+
+    def test_template_renders_injection_key_for_inj_channels(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # Regression test: a first attempt at this conditional used
+        # `{% assign uses_injection = true %}` *inside* a `{% for %}` loop
+        # in the Liquid template itself, which silently never took effect
+        # outside the loop (confirmed directly: the rendered ini omitted
+        # `injection =` even for INJ channels) -- a well-known Jinja2 for-
+        # loop variable-scoping gotcha, since asimov's "liquid" templating
+        # package is actually Jinja2-based. Fixed by computing this once in
+        # Python (`SimplePE.uses_injection`) and referencing it from the
+        # template as `pipeline.uses_injection` instead.
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {"H1": "INJ", "L1": "INJ"},
+            "asd": {"H1": "aLIGOZeroDetHighPower", "L1": "aLIGOZeroDetHighPower"},
+        }
+
+        pipeline = SimplePE(mock_production)
+        pipeline.before_config()
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert parser.get("pipeline", "injection") == os.path.join(
+            mock_production.rundir, "injection.json"
         )
 
 

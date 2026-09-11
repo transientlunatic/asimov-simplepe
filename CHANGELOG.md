@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `config_template`/`before_config()`: when any interferometer's
+  `data.channels` value is the `INJ` magic value, `simple_pe_pipe`'s
+  `datafind` node now gets a real `--injection` JSON file. Without it,
+  `simple_pe_datafind.py`'s own per-ifo channel loop
+  (`elif "inj" in value.lower(): if not os.path.isfile(opts.injection):`)
+  crashes with `TypeError: stat: path should be string, bytes,
+  os.PathLike or integer, not NoneType` instead of its intended
+  `FileNotFoundError` -- confirmed directly from the real source (dumped
+  in this plugin's own e2e CI, since `git.ligo.org` isn't reachable from
+  where this plugin is authored): `--injection` defaults to `None` and
+  that line never guards against it. `SimplePE.uses_injection` (a
+  property, so `configs/simplepe.ini` can reference it as
+  `pipeline.uses_injection`) detects this case with the same
+  case-insensitive substring check as the real code;
+  `before_config()`'s new `_write_injection_parameters()` writes
+  `injection.json` from the production's `trigger` metadata, using the
+  schema confirmed directly from `simple_pe_datafind.py`'s
+  `get_injection_data()`: masses/spins in the underscored LIGO
+  convention (`mass_1`/`mass_2`/`spin_1x` etc -- the only keys that
+  function itself converts to `pycbc.waveform.get_td_waveform`'s
+  convention), `delta_t` derived from this template's own `f_high` to
+  stay consistent with it (the real code derives `f_high` *back* from
+  `delta_t` as `1 / 2 / delta_t`), and `ra`/`dec`/`psi`/`time` passed
+  through directly. A first version of the template-side conditional
+  used `{% assign uses_injection = true %}` *inside* a Liquid `{% for
+  %}` loop, which silently never took effect outside the loop -- a
+  Jinja2 for-loop variable-scoping gotcha (asimov's "liquid" templating
+  package is actually Jinja2-based), confirmed directly by rendering
+  the template locally. Moving the check into a Python property fixed
+  it for real.
 - e2e test / README / docs: use `data.channels.<IFO>: INJ` (confirmed
   directly from `simple_pe_pipe --help`: a documented magic value
   meaning "simulate an injection, don't read real strain data") instead

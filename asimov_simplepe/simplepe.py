@@ -17,6 +17,7 @@ scheduler abstraction rather than talking to HTCondor/Slurm directly.
 import configparser
 import glob
 import importlib.resources
+import json
 import os
 import shutil
 import subprocess
@@ -92,10 +93,105 @@ class SimplePE(Pipeline):
         """
         return os.path.join(self.production.rundir, "trigger_parameters.ini")
 
+    def _injection_parameters_file(self):
+        """
+        Path to the injection-parameters JSON file passed as
+        ``simple_pe_datafind``'s ``--injection`` argument.
+
+        Required whenever any interferometer's ``data.channels`` value is
+        the documented ``INJ`` magic value ("simulate an injection, don't
+        read real strain data") -- confirmed directly from
+        ``simple_pe_datafind``'s real source
+        (``simple_pe/cli/simple_pe_datafind.py``): its per-ifo channel loop
+        does ``elif "inj" in value.lower(): if not
+        os.path.isfile(opts.injection): raise FileNotFoundError(...)`` with
+        no guard for ``opts.injection`` being ``None`` (its default), so a
+        bare ``TypeError`` is raised instead of that intended
+        ``FileNotFoundError`` if ``--injection`` isn't passed at all --
+        confirmed via this plugin's own e2e CI.
+        """
+        return os.path.join(self.production.rundir, "injection.json")
+
+    @property
+    def uses_injection(self):
+        """
+        Whether any interferometer's ``data.channels`` value asks
+        ``simple_pe_datafind`` to simulate an injection (the ``INJ`` magic
+        value), matching its own ``"inj" in value.lower()`` check.
+
+        Exposed as a property (rather than a leading-underscore helper) so
+        ``configs/simplepe.ini`` can reference it directly as
+        ``pipeline.uses_injection`` -- computing this same case-insensitive
+        substring check in Liquid/Jinja2 itself ran into that templating
+        engine's for-loop variable scoping (an ``{% assign %}`` inside a
+        ``{% for %}`` doesn't persist outside the loop, confirmed directly:
+        a first attempt at this silently rendered as if no channel were
+        ``INJ`` at all), so this is computed once, in Python, and shared by
+        both the template and :meth:`before_config`.
+        """
+        channels = self.production.meta.get("data", {}).get("channels", {})
+        return any("inj" in str(value).lower() for value in channels.values())
+
+    def _write_injection_parameters(self):
+        """
+        Write the injection-parameters JSON file consumed by
+        ``simple_pe_datafind`` when :attr:`uses_injection` is true.
+
+        Its schema is confirmed directly from ``simple_pe_datafind``'s real
+        source (``get_injection_data()`` in
+        ``simple_pe/cli/simple_pe_datafind.py``): masses/spins use the
+        underscored LIGO convention (``mass_1``/``mass_2``/``spin_1x`` etc,
+        the only keys the code converts to ``pycbc.waveform.get_td_waveform``'s
+        convention -- everything else, including ``delta_t``/``f_lower``,
+        already matches pycbc's own argument names and is passed straight
+        through), ``phase`` (auto-converted to ``coa_phase``), and
+        ``ra``/``dec``/``psi``/``time`` used directly for the detector
+        projection. ``delta_t`` doubles as the sample spacing *and* as the
+        source of the injection PSD's high-frequency cutoff (``f_high = 1 /
+        2 / delta_t``, confirmed from the same source), so it's derived
+        from this template's own ``f_high`` default/override to keep the
+        two consistent.
+        """
+        trigger = self.production.meta.get("trigger", {})
+        waveform = self.production.meta.get("waveform", {})
+        quality = self.production.meta.get("quality", {})
+        likelihood = self.production.meta.get("likelihood", {})
+        ifos = self.production.meta.get("interferometers", [])
+
+        f_high = quality.get("high frequency", 1024) if quality else 1024
+        f_low = 20
+        minimum_frequency = likelihood.get("minimum frequency", {})
+        if ifos and minimum_frequency:
+            f_low = minimum_frequency.get(ifos[0], f_low)
+
+        injection = {
+            "mass_1": trigger.get("mass1", 1.4),
+            "mass_2": trigger.get("mass2", 1.4),
+            "spin_1x": 0,
+            "spin_1y": 0,
+            "spin_1z": trigger.get("spin1z", 0),
+            "spin_2x": 0,
+            "spin_2y": 0,
+            "spin_2z": trigger.get("spin2z", 0),
+            "ra": trigger.get("ra", 0),
+            "dec": trigger.get("dec", 0),
+            "psi": trigger.get("psi", 0),
+            "phase": trigger.get("phase", 0),
+            "distance": trigger.get("distance", 400),
+            "inclination": trigger.get("inclination", 0),
+            "time": self.production.meta.get("event time", ""),
+            "approximant": waveform.get("approximant", "IMRPhenomD"),
+            "f_lower": f_low,
+            "delta_t": 1.0 / (2 * f_high),
+        }
+        with open(self._injection_parameters_file(), "w") as injection_file:
+            json.dump(injection, injection_file)
+
     def before_config(self, dryrun=False):
         """
-        Write the trigger-parameters file before Asimov renders this
-        production's main ``.ini`` from ``config_template``.
+        Write the trigger-parameters file (and, if needed, the
+        injection-parameters file) before Asimov renders this production's
+        main ``.ini`` from ``config_template``.
 
         Called by Asimov's ``manage build`` step (``production.pipeline.before_config()``)
         immediately before ``production.make_config()``, so the rundir (and
@@ -123,6 +219,9 @@ class SimplePE(Pipeline):
             parser.set("parameters", key, str(value))
         with open(self._trigger_parameters_file(), "w") as trigger_file:
             parser.write(trigger_file)
+
+        if self.uses_injection:
+            self._write_injection_parameters()
 
     def _executable(self):
         """
