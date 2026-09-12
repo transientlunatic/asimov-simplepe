@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     precessing_approximant()`, which queries LALSimulation's own real
     spin-support metadata for the approximant rather than guessing from
     its name.
+  - Even with `IMRPhenomXHM`, a real run hit no crash at all (no
+    `OverflowError`, `IndexError`, or `SIGKILL`) but was still genuinely
+    running -- not stuck -- when a 900s wait for `posterior_samples.dat`
+    ran out (`DAG status` stayed `DAG_STATUS_OK` throughout). Bumped that
+    wait to 1500s and `e2e.yml`'s own `timeout-minutes` from 30 to 45 to
+    match; even that ran out with the analysis still healthily
+    converging, no crash. A real subdominant-mode reweighting analysis
+    over real GW150914 data, on a single CPU (`ncpus: 1`), apparently
+    needs well over 25 wall-clock minutes to converge to the
+    default 1000 effective samples -- addressed by capping
+    `neffective` down for this test specifically (see `Added`, below)
+    rather than continuing to guess at an unbounded timeout ceiling.
 - `resurrect()` now raises `PipelineException` instead of silently
   returning `None` once it can no longer usefully resubmit the DAG.
   Asimov's monitor loop (`RunningState._handle_no_condor_job` in asimov
@@ -382,6 +394,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own printed argument `Namespace` in CI.
 
 ### Added
+- `config_template` now renders `neffective` when a production sets
+  `production.meta['neffective']` (e.g. `20`), omitted entirely
+  otherwise so real production use keeps `simple_pe_analysis`'s own
+  default (1000 effective samples, confirmed directly from its real
+  source) -- confirmed via `_format_arg_lists()` in `simple_pe_pipe.py`
+  that an unset value is dropped from the real command line rather than
+  rendered as a literal `None`. This plugin's own e2e test now sets it
+  to `20` (`tests/test_blueprints/simplepe_production.yaml`): confirmed
+  directly via this plugin's own e2e CI that even the cheaper,
+  higher-mode-only `IMRPhenomXHM` approximant needs well over 25
+  wall-clock minutes on a single CPU to converge to the default 1000 --
+  more than is reasonable to demand of a smoke test of this plugin's own
+  config rendering, DAG building, and submission (not a validation of
+  simple-pe's actual scientific output).
 - `scripts/patch_simple_pe_reweight_guard.py`, a short-term stopgap for
   the confirmed upstream `pesummary` reweighting `OverflowError`
   documented under "Fixed" above (see the "e2e test: the completion

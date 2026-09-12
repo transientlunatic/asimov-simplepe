@@ -826,6 +826,41 @@ class TestRealConfigRendering:
         # already assumes handles post-processing (see README's
         # Post-processing section). Regression test for this duplication.
         assert parser.get("pipeline", "disable_pesummary") == "True"
+        # neffective is left unset by default -- simple_pe_analysis's own
+        # default (1000 effective samples, confirmed directly from its
+        # real source) should apply for real production use unless a
+        # production explicitly opts into a lower target (e.g. this
+        # plugin's own e2e test; see CHANGELOG.md).
+        assert not parser.has_option("pipeline", "neffective")
+
+    def test_template_renders_custom_neffective(
+        self, mock_production, mock_config, temp_dir
+    ):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["neffective"] = 20
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert parser.get("pipeline", "neffective") == "20"
 
     def test_template_renders_custom_peak_finder(
         self, mock_production, mock_config, temp_dir

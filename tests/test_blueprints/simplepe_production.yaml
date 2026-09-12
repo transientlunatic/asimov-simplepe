@@ -47,11 +47,29 @@
 # receive a nonexistent ASD file and fail before analysis).
 # Two detectors, not one -- see fake_event.yaml's comment for why that
 # matters here.
+#
+# `neffective: 20`, not left at simple_pe_analysis's own default (1000):
+# confirmed directly via this plugin's own e2e CI that a real analysis
+# against real GW150914 data, even with the lighter, higher-mode-capable
+# IMRPhenomXHM approximant (see fake_event.yaml's comment), genuinely
+# needs more than 25 wall-clock minutes on a single CPU to converge to
+# 1000 effective samples -- confirmed no crash of any kind across two
+# separate, generous wait windows (900s then 1500s), just still
+# converging when each ran out. 20 effective samples is enough to prove
+# the whole pipeline genuinely completes end to end (a real,
+# non-empty, non-degenerate posterior_samples.dat) without demanding
+# full-scale statistical convergence from what is fundamentally a smoke
+# test of this plugin's own config rendering, DAG building, and
+# submission -- not a validation of simple-pe's actual scientific
+# output. Real production use should leave this unset (see
+# config_template's own comment) and get simple-pe's own considered
+# default.
 kind: analysis
 name: simplepe-test
 pipeline: simplepe
 comment: Simple-PE end-to-end test production (real GW150914 data via GWOSC)
 status: ready
+neffective: 20
 trigger:
   mass1: 36
   mass2: 29

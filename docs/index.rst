@@ -194,6 +194,19 @@ This walks through a complete example.
       containing only its ``datafind`` job, with no error at all.
       Confirmed directly via this plugin's own e2e CI.
 
+   .. note::
+
+      ``neffective`` is unset by default -- ``simple_pe_analysis`` uses
+      its own default (1000 effective samples, confirmed directly from
+      its real source), the right choice for real production use.
+      Override it via ``production.meta['neffective']``, e.g. ``20``, to
+      cap a slow real analysis's convergence target down for a quick
+      smoke test (this plugin's own e2e test does exactly that -- a real
+      analysis against real GW150914 data, even with a higher-mode-
+      capable, non-precessing approximant, genuinely needs well over 25
+      wall-clock minutes on a single CPU to converge to 1000 effective
+      samples, confirmed directly via this plugin's own e2e CI).
+
 4. Wait for it to finish, checking status with:
 
    .. code-block:: bash
@@ -335,42 +348,54 @@ PESummary twice for no benefit.
 
 .. note::
 
-   **Known issue:** ``simple_pe_pipe``'s own ``analysis`` stage currently hits a
-   genuine upstream numerical-robustness bug -- unrelated to the ``INJ``-mode
-   issue above, and hit on every real analysis regardless of channel mode --
-   before it can produce a posterior samples file: PESummary's subdominant-
+   **Known issue (root-caused, not a permanent blocker):**
+   ``simple_pe_pipe``'s own ``analysis`` stage can hit a real crash
+   before producing a posterior samples file: PESummary's subdominant-
    multipole rejection-sampling reweighting
    (``pesummary.core.reweight.rejection_sampling()``, called unconditionally
    from ``simple_pe.param_est.pe.reweight_based_on_observed_snrs()``) has no
    guard against a non-finite weight, and raises ``OverflowError: Range
-   exceeds valid bounds`` when one occurs -- confirmed directly via this
-   plugin's own e2e CI against real GW150914 GWOSC data (see ``CHANGELOG.md``
-   for the full trail). This is a *different* use of PESummary than the
-   ``disable_pesummary``/post-processing job above: it happens inside
-   ``simple_pe_analysis`` itself, as part of generating posterior samples
-   from the Fisher-matrix point estimate, and isn't gated by
-   ``disable_pesummary`` at all (confirmed directly: ``simple_pe_analysis
-   --help`` doesn't even expose that flag). There is no CLI flag to disable or adjust this
-   reweighting step, so it isn't something this plugin's ini/config
-   rendering can work around. This plugin's own DAG building and submission
-   are confirmed correct up to this point -- ``datafind``, ``filter``, and
-   ``analysis``'s own Fisher-matrix metric peak-finding and SNR computation
-   all complete successfully, writing real ``peak_parameters.json``/
-   ``peak_snrs.json`` output -- so the e2e test verifies that real,
-   currently-achievable output directly rather than requiring a full
-   posterior-samples file.
+   exceeds valid bounds`` when one occurs. This is a *different* use of
+   PESummary than the ``disable_pesummary``/post-processing job above: it
+   happens inside ``simple_pe_analysis`` itself, as part of generating
+   posterior samples from the Fisher-matrix point estimate, and isn't
+   gated by ``disable_pesummary`` at all.
 
-   **Short-term workaround.** The correct fix belongs upstream (in either
-   ``simple-pe``, guarding the SNR calculation against the divide-by-zero
-   directly, or ``pesummary``, guarding ``rejection_sampling()`` itself,
-   since any of its other callers could hit the same crash) -- but until
-   one lands, this repo ships
-   ``scripts/patch_simple_pe_reweight_guard.py``, which patches an
-   installed ``simple-pe``'s ``reweight_based_on_observed_snrs()`` in
-   place to zero out any non-finite weight before it reaches
-   ``rejection_sampling()`` -- treating a numerically broken sample as
-   zero-probability (rejected) rather than crashing, or (worse) treating
-   it as certain. Run it once, in the same Python environment
+   This first looked like a genuine, unfixable upstream numerical-
+   robustness bug -- but root-causing it directly via this plugin's own
+   e2e CI (see ``CHANGELOG.md`` for the full trail) found the real
+   trigger: the reweighting step unconditionally measures the *observed*
+   SNR in the (3,3)/(4,4) higher multipoles and in precession, regardless
+   of whether the configured ``waveform.approximant`` can represent them.
+   Against a dominant-mode-only, non-precessing approximant (e.g.
+   ``IMRPhenomD``), those observed SNRs come back ``NaN``, and the
+   reference distribution built from them underflows to exactly ``0.0``
+   probability for essentially every sample once zeroed -- not a rare
+   outlier, but systemic corruption. Using an approximant that actually
+   supports higher modes (e.g. ``IMRPhenomXHM`` or ``IMRPhenomXPHM`` --
+   the latter is ``simple_pe_filter``'s/``simple_pe_analysis``'s own
+   ``--approximant`` default) avoids this entirely, confirmed directly:
+   no ``OverflowError`` (or any other crash) recurs. ``simple-pe``'s own
+   real-waveform interpolation grids do make a precessing+higher-mode
+   approximant meaningfully slower to converge than a dominant-mode-only
+   one, though -- see the ``neffective`` note above for how this
+   plugin's own e2e test manages that.
+
+   **Defensive safety net.** ``simple-pe``'s
+   ``reweight_based_on_observed_snrs()``/PESummary's
+   ``rejection_sampling()`` still have no guard against a non-finite
+   weight even with a correct approximant choice -- a real analysis
+   could still hit a similarly degenerate weight for other reasons this
+   plugin hasn't characterised.
+   ``scripts/patch_simple_pe_reweight_guard.py`` patches an installed
+   ``simple-pe``'s ``reweight_based_on_observed_snrs()`` in place to zero
+   out any non-finite weight before it reaches ``rejection_sampling()``
+   -- treating a numerically broken sample as zero-probability (rejected)
+   rather than crashing, or (worse) treating it as certain. The correct
+   fix still belongs upstream (in either ``simple-pe`` or ``pesummary``,
+   since any of ``rejection_sampling()``'s other callers could hit the
+   same crash); this is deliberately just a stopgap. Run it once, in the
+   same Python environment
    ``simple_pe_analysis`` runs in, right after installing ``simple-pe``
    and before running any real analysis:
 
