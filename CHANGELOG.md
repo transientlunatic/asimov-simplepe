@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `configs/simplepe.ini` now sets `disable_pesummary = True`. Left at its
+  default `False`, `simple_pe_pipe`'s own `main()` bakes a full PESummary
+  post-processing job into its DAG as a child of the analysis node
+  (confirmed directly from its real source) -- duplicating the separate,
+  `needs:`-linked PESummary production this plugin's own design already
+  assumes handles post-processing (see README's *Post-processing*
+  section), and running PESummary twice for no benefit. This is a
+  distinct DAG-construction option from the always-on, unconditional
+  PESummary-based reweighting inside `simple_pe_analysis` itself
+  (`simple_pe_analysis --help` doesn't even expose `disable_pesummary`),
+  so it does not affect the separate, currently-unavoidable upstream
+  reweighting bug documented elsewhere in this file.
 - Addressed a GitHub Copilot code review of the initial PR:
   - `_ensure_rundir()`'s fallback branch (no `production.rundir` set) now
     resolves to an absolute path via `os.path.abspath()`, matching the

@@ -325,6 +325,14 @@ production once this one finishes; this plugin only needs to make its samples
 available via ``collect_assets()``, which it always does regardless of whether
 anything ever consumes them.
 
+This is also why the bundled ``configs/simplepe.ini`` template sets
+``disable_pesummary = True``: left at its default ``False``,
+``simple_pe_pipe``'s own DAG bakes a full PESummary post-processing job
+into itself as a child of the analysis node (confirmed directly from its
+real ``main()`` source) -- duplicating whatever separate, ``needs:``-linked
+PESummary production is meant to handle post-processing, and running
+PESummary twice for no benefit.
+
 .. note::
 
    **Known issue:** ``simple_pe_pipe``'s own ``analysis`` stage currently hits a
@@ -337,7 +345,12 @@ anything ever consumes them.
    guard against a non-finite weight, and raises ``OverflowError: Range
    exceeds valid bounds`` when one occurs -- confirmed directly via this
    plugin's own e2e CI against real GW150914 GWOSC data (see ``CHANGELOG.md``
-   for the full trail). There is no CLI flag to disable or adjust this
+   for the full trail). This is a *different* use of PESummary than the
+   ``disable_pesummary``/post-processing job above: it happens inside
+   ``simple_pe_analysis`` itself, as part of generating posterior samples
+   from the Fisher-matrix point estimate, and isn't gated by
+   ``disable_pesummary`` at all (confirmed directly: ``simple_pe_analysis
+   --help`` doesn't even expose that flag). There is no CLI flag to disable or adjust this
    reweighting step, so it isn't something this plugin's ini/config
    rendering can work around. This plugin's own DAG building and submission
    are confirmed correct up to this point -- ``datafind``, ``filter``, and
