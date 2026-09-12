@@ -17,5 +17,22 @@ interferometers:
 - H1
 - L1
 event time: 1126259462.4
+# IMRPhenomXPHM, not IMRPhenomD -- matches simple_pe_filter's/
+# simple_pe_analysis's own --approximant default (confirmed directly
+# from their real source), and is genuinely required for this analysis
+# to work at all: simple_pe_analysis's reweighting step unconditionally
+# measures the *observed* SNR in the (3,3)/(4,4) higher multipoles and
+# in precession, regardless of whether the approximant can represent
+# them. IMRPhenomD is dominant-mode-only and non-precessing, so those
+# observed SNRs came back NaN -- confirmed directly via this plugin's
+# own e2e CI (`peak_snrs.json` showed `"33": [nan], "44": [nan]`). Once
+# `np.nan_to_num` zeroed those NaNs, the reference (noncentral
+# chi-squared) distribution used to weight each sample became a
+# *central* one evaluated at the (artificially large, from this test's
+# synthetic near-design-sensitivity ASD combined with GW150914's real,
+# close distance) predicted higher-mode SNR -- which underflows to
+# exactly 0.0 probability in float64 for every sample, not just
+# outliers, corrupting the whole reweighting step (root-caused directly
+# via this plugin's own e2e CI; see CHANGELOG.md for the full trail).
 waveform:
-  approximant: IMRPhenomD
+  approximant: IMRPhenomXPHM

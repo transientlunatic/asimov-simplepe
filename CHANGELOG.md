@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `tests/test_blueprints/fake_event.yaml`'s `waveform.approximant` is now
+  `IMRPhenomXPHM`, not `IMRPhenomD` -- the actual root cause of the e2e
+  test's reweighting crash, confirmed directly via this plugin's own
+  e2e CI (not a genuine, unfixable upstream numerical-robustness bug as
+  first assumed; see the entries below documenting that investigation).
+  `IMRPhenomD` is a dominant-mode-only, non-precessing waveform model,
+  but `simple_pe_analysis`'s reweighting step unconditionally measures
+  the *observed* SNR in the (3,3)/(4,4) higher multipoles and in
+  precession regardless of whether the approximant can represent them
+  at all. Against `IMRPhenomD`, those observed SNRs came back `NaN`
+  (confirmed directly: a real run's `peak_snrs.json` contained
+  `"33": [nan], "44": [nan]`). Once `np.nan_to_num` zeroed those NaNs
+  (per `scripts/patch_simple_pe_reweight_guard.py`, below), the
+  reference (noncentral chi-squared) distribution used to weight each
+  sample became a *central* one evaluated at the predicted higher-mode
+  SNR for that sample -- which, given this test's inflated dominant-mode
+  SNR (~113, from a synthetic near-design-sensitivity ASD combined with
+  GW150914's real, close distance -- real GW150914's SNR is ~24),
+  underflows to exactly `0.0` probability in float64 for essentially
+  every sample, not just outliers, corrupting the whole reweighting
+  step regardless of any inf/nan-weight guard. `IMRPhenomXPHM` matches
+  `simple_pe_filter`'s/`simple_pe_analysis`'s own `--approximant`
+  default (confirmed directly from their real source) and genuinely
+  supports higher modes and precession, so the observed SNRs it
+  produces are real, finite numbers instead of `NaN`.
 - `resurrect()` now raises `PipelineException` instead of silently
   returning `None` once it can no longer usefully resubmit the DAG.
   Asimov's monitor loop (`RunningState._handle_no_condor_job` in asimov
