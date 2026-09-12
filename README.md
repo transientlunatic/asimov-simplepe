@@ -94,7 +94,7 @@ pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple
 > bundled template (`configs/simplepe.ini`) -- `trigger_time`,
 > `trigger_parameters`, `outdir`, `channels`, `asd`, `f_low`, `f_high`,
 > `approximant`, `accounting_group`, `accounting_group_user`,
-> `generate_corner` -- and their value formats are confirmed directly
+> `generate_corner`, `disable_pesummary` -- and their value formats are confirmed directly
 > against a real, live `simple_pe_pipe --help` and a real successful DAG
 > build in this plugin's own end-to-end CI. Its output-file detection
 > (`samples()`) is still an unconfirmed best-effort guess, though: it
@@ -239,6 +239,13 @@ Asimov's own dependency resolution builds and submits
 PESummary picks up its samples via `simplepe-imrphenomxphm`'s
 `collect_assets()` (through `production._previous_assets()`).
 
+This is also why `configs/simplepe.ini` sets `disable_pesummary = True`.
+`simple_pe_pipe`'s own DAG otherwise bakes a full PESummary
+post-processing job into itself as a child of the analysis node whenever
+that option is left at its default `False` (confirmed directly from its
+real `main()` source) -- duplicating the separate, `needs:`-linked
+PESummary production above, and running PESummary twice for no benefit.
+
 **Known issue:** `simple_pe_pipe`'s own `analysis` stage currently hits a
 genuine upstream numerical-robustness bug -- unrelated to the `INJ`-mode
 issue above, and hit on every real analysis regardless of channel mode --
@@ -249,7 +256,12 @@ from `simple_pe.param_est.pe.reweight_based_on_observed_snrs()`) has no
 guard against a non-finite weight, and raises `OverflowError: Range
 exceeds valid bounds` when one occurs -- confirmed directly via this
 plugin's own e2e CI against real GW150914 GWOSC data (see `CHANGELOG.md`
-for the full trail). There is no CLI flag to disable or adjust this
+for the full trail). This is a *different* use of PESummary than the
+`disable_pesummary`/`PostProcessingNode` above: it happens inside
+`simple_pe_analysis` itself, as part of generating posterior samples from
+the Fisher-matrix point estimate, and isn't gated by `disable_pesummary`
+at all (confirmed directly: `simple_pe_analysis --help` doesn't even
+expose that flag). There is no CLI flag to disable or adjust this
 reweighting step, so it isn't something this plugin's ini/config
 rendering can work around. This plugin's own DAG building and submission
 are confirmed correct up to this point -- `datafind`, `filter`, and

@@ -816,6 +816,16 @@ class TestRealConfigRendering:
         # plugin's own e2e CI, using its real `logger.info(opts)` dump
         # of the parsed Namespace. Regression test for this real bug.
         assert parser.get("pipeline", "peak_finder") == "metric"
+        # --disable_pesummary defaults to False, which makes
+        # simple_pe_pipe's own DAG build a PostProcessingNode child of the
+        # analysis job -- a full PESummary post-processing stage baked
+        # directly into simple-pe's own DAG (confirmed directly from its
+        # real main() source). Left at its default, this would run
+        # PESummary twice: once here, and again in whatever separate,
+        # needs:-linked PESummary production this plugin's own design
+        # already assumes handles post-processing (see README's
+        # Post-processing section). Regression test for this duplication.
+        assert parser.get("pipeline", "disable_pesummary") == "True"
 
     def test_template_renders_custom_peak_finder(
         self, mock_production, mock_config, temp_dir
