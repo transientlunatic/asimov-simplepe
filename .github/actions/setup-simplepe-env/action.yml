@@ -16,6 +16,28 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve simple-pe ref to a commit SHA
+      # The conda-env cache key below must be keyed on an immutable
+      # commit, not the (possibly moving) ref name itself: with only the
+      # ref name in the key, a cache created for `simple-pe-ref: main`
+      # stays a hit forever, even after upstream `main` advances -- so a
+      # later commit to simple-pe's `main` would silently be skipped
+      # entirely, and the e2e job would keep testing whatever revision
+      # happened to be current the first time this key was populated.
+      # `git ls-remote` resolves a branch/tag ref to its current commit
+      # (annotated tags resolve to the tag object, not the commit it
+      # points at, but that's still stable per tag content, which is all
+      # this key needs); an explicit commit SHA passed as `simple-pe-ref`
+      # doesn't match any ref and so falls back to using it verbatim.
+      id: resolve-simple-pe-ref
+      shell: bash
+      run: |
+        SHA=$(git ls-remote https://git.ligo.org/stephen-fairhurst/simple-pe.git "${{ inputs.simple-pe-ref }}" | cut -f1)
+        if [ -z "$SHA" ]; then
+          SHA="${{ inputs.simple-pe-ref }}"
+        fi
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
     - name: Cache conda packages and pip
       uses: actions/cache@v4
       with:
@@ -49,7 +71,7 @@ runs:
         # here would let a constraint change silently no-op on a cache hit
         # restored from an already-cached env from an earlier run in this
         # same PR that predates it.
-        key: conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-${{ inputs.simple-pe-ref }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml', '.github/actions/setup-simplepe-env/action.yml') }}
+        key: conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-${{ steps.resolve-simple-pe-ref.outputs.sha }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml', '.github/actions/setup-simplepe-env/action.yml') }}
         restore-keys: |
           conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-
 

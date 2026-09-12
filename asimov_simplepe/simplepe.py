@@ -74,10 +74,12 @@ class SimplePE(Pipeline):
         if self.production.rundir:
             self.production.rundir = os.path.abspath(self.production.rundir)
         else:
-            self.production.rundir = os.path.join(
-                config.get("general", "rundir_default"),
-                self.production.event.name,
-                self.production.name,
+            self.production.rundir = os.path.abspath(
+                os.path.join(
+                    config.get("general", "rundir_default"),
+                    self.production.event.name,
+                    self.production.name,
+                )
             )
         os.makedirs(self.production.rundir, exist_ok=True)
         return self.production.rundir
@@ -308,6 +310,17 @@ class SimplePE(Pipeline):
             print(f"simple_pe_pipe {ini}")
             return ini
 
+        # Snapshot any DAG already on disk before invoking simple_pe_pipe:
+        # _dag_file() searches the whole rundir without regard to when a
+        # match was written, so a retried build_dag() in a rundir that
+        # already contains a DAG from a previous invocation could
+        # otherwise report success against that stale file even if this
+        # run's simple_pe_pipe silently failed to (re)write one.
+        pre_existing_dag = self._dag_file()
+        pre_existing_mtime = (
+            os.path.getmtime(pre_existing_dag) if pre_existing_dag else None
+        )
+
         command = [self._executable(), ini]
         self.logger.info(" ".join(command))
         try:
@@ -328,7 +341,12 @@ class SimplePE(Pipeline):
         out = out.decode(errors="replace") if isinstance(out, bytes) else out
 
         dag_file = self._dag_file()
-        if pipe.returncode != 0 or dag_file is None:
+        dag_is_stale = (
+            dag_file is not None
+            and dag_file == pre_existing_dag
+            and os.path.getmtime(dag_file) == pre_existing_mtime
+        )
+        if pipe.returncode != 0 or dag_file is None or dag_is_stale:
             self.production.status = "stuck"
             self.logger.error(f"DAG file could not be created.\n{command}\n{out}")
             raise PipelineException(
@@ -422,6 +440,11 @@ class SimplePE(Pipeline):
                     recursive=True,
                 )
             )
+            # A zero-byte match is not a real result: a truncated or
+            # still-being-written file (e.g. from an interrupted run)
+            # would otherwise be indistinguishable from a genuine, complete
+            # samples file.
+            matches = [match for match in matches if os.path.getsize(match) > 0]
             if matches:
                 return matches
         return []
@@ -453,11 +476,20 @@ class SimplePE(Pipeline):
         """
         Collect all of the log files which have been produced by this
         production and return their contents as a dictionary.
+
+        Matches both the generic ``.err``/``.out``/``.log`` suffixes and
+        the ``.error``/``.output`` suffixes ``simple_pe_pipe``'s own
+        generated DAG nodes actually use (confirmed directly via this
+        plugin's own e2e CI, whose diagnostics read ``error/*.error`` and
+        ``output/*.output``) -- without the latter, this method silently
+        never finds the real Simple-PE node diagnostics.
         """
         logs = (
             glob.glob(os.path.join(self.production.rundir, "**", "*.err"), recursive=True)
             + glob.glob(os.path.join(self.production.rundir, "**", "*.out"), recursive=True)
             + glob.glob(os.path.join(self.production.rundir, "**", "*.log"), recursive=True)
+            + glob.glob(os.path.join(self.production.rundir, "**", "*.error"), recursive=True)
+            + glob.glob(os.path.join(self.production.rundir, "**", "*.output"), recursive=True)
         )
         messages = {}
         for log in logs:

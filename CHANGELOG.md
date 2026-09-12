@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Addressed a GitHub Copilot code review of the initial PR:
+  - `_ensure_rundir()`'s fallback branch (no `production.rundir` set) now
+    resolves to an absolute path via `os.path.abspath()`, matching the
+    explicit-rundir branch and this method's documented promise. A
+    relative `[general] rundir_default` previously left the rendered
+    `outdir`/trigger paths relative to the process's working directory.
+  - `build_dag()` now snapshots any pre-existing DAG file (path + mtime)
+    before invoking `simple_pe_pipe`, and treats an unchanged file as
+    build failure rather than success: `_dag_file()` searches the whole
+    rundir with no notion of "created by this invocation", so a retried
+    `build_dag()` in a rundir that already contained a DAG from a
+    previous run could otherwise report success against that stale file
+    even when this run's `simple_pe_pipe` silently failed to (re)write
+    one.
+  - `samples()` now skips zero-byte matches: a truncated or
+    still-being-written file (e.g. from an interrupted run) was
+    previously indistinguishable from a genuine, complete samples file,
+    so `detect_completion()` could report a production finished against
+    an empty/invalid artifact.
+  - `collect_logs()` now also matches `*.error`/`*.output`, not just
+    `*.err`/`*.out`/`*.log`: `simple_pe_pipe`'s own generated DAG nodes
+    write the former (confirmed directly via this plugin's own e2e CI,
+    whose diagnostics read `error/*.error`/`output/*.output`), so this
+    method previously never found the real Simple-PE node diagnostics.
+  - `.github/actions/setup-simplepe-env`'s conda-env cache key is now
+    keyed on `simple-pe-ref` resolved to an immutable commit SHA (via
+    `git ls-remote`), not the ref name itself: keyed only on the name, a
+    cache populated once for `simple-pe-ref: main` stayed a hit forever,
+    so a later commit to upstream `main` would silently be skipped and
+    the e2e job would keep testing a stale revision indefinitely.
+  - `.github/workflows/e2e.yml`'s `push` trigger is now scoped to `main`
+    only (matching `docs.yml`'s existing pattern), not every branch and
+    tag: this is a real ~30-minute job against a real HTCondor scheduler
+    and real GWOSC network access, so running it on every push to every
+    branch burned substantial runner time and added real-network
+    flakiness to routine, not-yet-reviewed development pushes; PR
+    coverage is unaffected (`pull_request` still covers every open PR).
+  - `.github/workflows/docs.yml`'s `build`/`deploy` job condition now
+    also accepts `workflow_dispatch`, not just `push`: the workflow
+    declares `workflow_dispatch` as a trigger, but the job itself only
+    checked `github.event_name == 'push'`, so a manual dispatch silently
+    built and deployed nothing.
+  - `tests/test_blueprints/simplepe_production.yaml`'s `data.asd` paths
+    are no longer hardcoded to this upstream repository's own
+    `/__w/asimov-simplepe/asimov-simplepe` workspace path -- that broke
+    on a fork or any runner whose workspace path differs (the Condor jobs
+    would receive a nonexistent ASD file and fail before analysis). The
+    blueprint now carries the literal placeholder `__ASD_PATH__`,
+    substituted with the real, runner-specific
+    `$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt` path by a new e2e.yml
+    step immediately before the blueprint is applied.
+  - README.md/docs/index.rst's install instructions now also pin
+    `numpy<2` (previously only `setuptools<82`), matching the constraint
+    `setup-simplepe-env` actually applies and needs (see this file's
+    existing "Fixed" entry on the real `filter`-node `TypeError` it
+    avoids) -- following only the documented instructions previously
+    risked hitting that same crash.
+  - README.md's trigger-parameter fallback description now matches
+    `before_config()`'s actual defaults (`mass1`/`mass2` to 1.4,
+    `ra`/`dec` to 0) instead of claiming masses/sky location are "left
+    blank".
+  - README.md/CHANGELOG.md's e2e-test descriptions no longer claim it
+    waits for a full, parseable posterior-samples file -- it currently
+    waits for and validates `peak_parameters.json`/`peak_snrs.json`
+    instead, per the upstream `pesummary` reweighting bug documented
+    elsewhere in both files.
 - e2e test: the "wait for real analysis output" step's `directory` now
   points at `.../simplepe-test/output`, not `.../simplepe-test` itself.
   `wait-for-files` matches patterns directly inside `directory`
@@ -264,7 +330,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that renders `configs/simplepe.ini` through the real Liquid engine.
 - A genuine end-to-end test (`.github/workflows/e2e.yml`): a real
   `simple_pe_pipe` DAG built and submitted through a real HTCondor
-  scheduler, waiting for a real, parseable posterior samples file.
+  scheduler against real GW150914 GWOSC data, waiting for and validating
+  the real `peak_parameters.json`/`peak_snrs.json` output its `analysis`
+  node produces. It does not currently wait for a full posterior-samples
+  file -- see the "Fixed" entries below documenting the confirmed upstream
+  `pesummary` reweighting bug that blocks that output against this
+  dataset.
 
 ### Fixed
 - `.github/actions/setup-simplepe-env` now pins `setuptools<82` before

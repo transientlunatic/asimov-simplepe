@@ -1,9 +1,15 @@
 name: End-to-end test (real simple_pe_pipe)
 
 on:
+  # Only push to main (post-merge validation) and pull_request runs --
+  # not every push to every branch/tag. This is a real ~30-minute job
+  # against a real HTCondor scheduler and real GWOSC network access, so
+  # running it on every branch push (as opposed to a branch that's part
+  # of an open PR, which pull_request already covers) burns substantial
+  # runner time and adds real-network flakiness to routine, in-progress
+  # development pushes that aren't ready for review yet.
   push:
-    branches: ['**']
-    tags: ['*']
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -110,6 +116,25 @@ jobs:
           echo "--- head of generated ASD file ---"
           head -5 "$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt"
 
+      # tests/test_blueprints/simplepe_production.yaml is a static,
+      # committed file, so it can't reference $GITHUB_WORKSPACE directly --
+      # it instead carries the literal placeholder `__ASD_PATH__`,
+      # substituted here with this runner's real, absolute ASD path. A
+      # plain `run:` step (not etive-io/actions/run-asimov-command), since
+      # that action wraps its script in an unquoted `su - submituser
+      # <<SUBMITUSER` heredoc that expands `$GITHUB_WORKSPACE` against the
+      # outer root shell (where it's typically unset) before the heredoc
+      # body reaches submituser's shell -- this needs the variable
+      # expanded normally, in the step's own shell.
+      - name: Render test blueprint with the real ASD path
+        run: |
+          sed "s|__ASD_PATH__|$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt|g" \
+            "$GITHUB_WORKSPACE/tests/test_blueprints/simplepe_production.yaml" \
+            > "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml"
+          chmod a+r "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml"
+          echo "--- rendered test blueprint ---"
+          cat "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml"
+
       - name: Set up git
         run: |
           su - submituser <<SUBMITUSER
@@ -175,7 +200,7 @@ jobs:
         with:
           script: |
             cd e2e_project
-            asimov apply -f "$GITHUB_WORKSPACE/tests/test_blueprints/simplepe_production.yaml" -e FAKE_SIMPLEPE_TEST_EVENT
+            asimov apply -f "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml" -e FAKE_SIMPLEPE_TEST_EVENT
             asimov manage build submit
 
       - name: Inspect the rendered config and generated DAG

@@ -204,6 +204,29 @@ class TestBuildDag:
             temp_dir, mock_production.event.name, mock_production.name
         )
 
+    def test_build_dag_falls_back_to_relative_rundir_default_resolves_absolute(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # rundir_default may be configured as a relative path; the fallback
+        # branch must still resolve to an absolute path (matching the
+        # explicit-rundir branch and this method's documented promise),
+        # since the rendered outdir/trigger paths and the DAG's own jobs
+        # would otherwise resolve it relative to whatever the process's
+        # current working directory happens to be at the time.
+        mock_production.rundir = None
+        relative_default = os.path.relpath(temp_dir)
+        mock_config.get = lambda section, key: (
+            relative_default if (section, key) == ("general", "rundir_default") else ""
+        )
+        pipeline = SimplePE(mock_production)
+
+        pipeline.build_dag(dryrun=True)
+
+        assert os.path.isabs(mock_production.rundir)
+        assert mock_production.rundir == os.path.join(
+            temp_dir, mock_production.event.name, mock_production.name
+        )
+
     def test_build_dag_dryrun_does_not_invoke_subprocess(
         self, mock_production, mock_config, temp_dir
     ):
@@ -314,6 +337,67 @@ class TestBuildDag:
         ), patch("asimov_simplepe.simplepe.subprocess.Popen", side_effect=fake_popen):
             with pytest.raises(PipelineException, match="DAG file could not be created"):
                 pipeline.build_dag(dryrun=False)
+
+    def test_build_dag_stale_preexisting_dag_raises(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # A DAG from a previous invocation already sits in the rundir.
+        # This run's simple_pe_pipe exits 0 but doesn't touch that file at
+        # all -- must not be reported as success against the stale DAG.
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        dag_path = os.path.join(mock_production.rundir, "simplepe.dag")
+        open(dag_path, "w").close()
+        old_mtime = os.path.getmtime(dag_path) - 100
+        os.utime(dag_path, (old_mtime, old_mtime))
+
+        pipeline = SimplePE(mock_production)
+
+        def fake_popen(command, **kwargs):
+            proc = MagicMock()
+            proc.communicate.return_value = (b"", None)
+            proc.returncode = 0
+            return proc
+
+        with patch(
+            "asimov_simplepe.simplepe.shutil.which",
+            return_value="/opt/conda/bin/simple_pe_pipe",
+        ), patch("asimov_simplepe.simplepe.subprocess.Popen", side_effect=fake_popen):
+            with pytest.raises(PipelineException, match="DAG file could not be created"):
+                pipeline.build_dag(dryrun=False)
+
+        assert mock_production.status == "stuck"
+
+    def test_build_dag_rewritten_dag_with_same_path_is_accepted(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # A DAG from a previous invocation exists, and this run's
+        # simple_pe_pipe genuinely rewrites it (same path, new mtime) --
+        # must be accepted as a fresh, successful result.
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        dag_path = os.path.join(mock_production.rundir, "simplepe.dag")
+        open(dag_path, "w").close()
+        old_mtime = os.path.getmtime(dag_path) - 100
+        os.utime(dag_path, (old_mtime, old_mtime))
+
+        pipeline = SimplePE(mock_production)
+
+        def fake_popen(command, **kwargs):
+            with open(dag_path, "w") as f:
+                f.write("rewritten")
+            proc = MagicMock()
+            proc.communicate.return_value = (b"", None)
+            proc.returncode = 0
+            return proc
+
+        with patch(
+            "asimov_simplepe.simplepe.shutil.which",
+            return_value="/opt/conda/bin/simple_pe_pipe",
+        ), patch("asimov_simplepe.simplepe.subprocess.Popen", side_effect=fake_popen):
+            result = pipeline.build_dag(dryrun=False)
+
+        assert result is not None
 
     def test_build_dag_missing_executable_raises_clear_exception(
         self, mock_production, mock_config, temp_dir
@@ -465,7 +549,8 @@ class TestDetectCompletionAndSamples:
     def test_posterior_samples_h5_detected(self, mock_production, mock_config, temp_dir):
         mock_production.rundir = temp_dir
         output = os.path.join(temp_dir, "posterior_samples.h5")
-        open(output, "w").close()
+        with open(output, "w") as f:
+            f.write("not really hdf5 but non-empty")
 
         pipeline = SimplePE(mock_production)
 
@@ -477,7 +562,8 @@ class TestDetectCompletionAndSamples:
         nested = os.path.join(temp_dir, "output")
         os.makedirs(nested)
         output = os.path.join(nested, "GW150914_posterior.dat")
-        open(output, "w").close()
+        with open(output, "w") as f:
+            f.write("mass_1 mass_2\n1.4 1.4\n")
 
         pipeline = SimplePE(mock_production)
 
@@ -487,6 +573,36 @@ class TestDetectCompletionAndSamples:
         mock_production.rundir = None
         pipeline = SimplePE(mock_production)
         assert pipeline.samples() == []
+
+    def test_empty_posterior_file_is_ignored(self, mock_production, mock_config, temp_dir):
+        # A zero-byte file (e.g. from a truncated or interrupted write)
+        # must not be treated as a genuine, complete samples file.
+        mock_production.rundir = temp_dir
+        output = os.path.join(temp_dir, "posterior_samples.h5")
+        open(output, "w").close()
+
+        pipeline = SimplePE(mock_production)
+
+        assert pipeline.samples() == []
+        assert pipeline.detect_completion() is False
+
+    def test_falls_back_to_non_empty_match_in_lower_priority_pattern(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # The highest-priority pattern (posterior_samples.h5) matches but is
+        # empty; a lower-priority pattern with real content should still be
+        # picked up rather than the search stopping at the first (empty)
+        # match.
+        mock_production.rundir = temp_dir
+        empty = os.path.join(temp_dir, "posterior_samples.h5")
+        open(empty, "w").close()
+        real = os.path.join(temp_dir, "GW150914_samples.dat")
+        with open(real, "w") as f:
+            f.write("mass_1 mass_2\n1.4 1.4\n")
+
+        pipeline = SimplePE(mock_production)
+
+        assert pipeline.samples() == [real]
 
 
 class TestCollectAssets:
@@ -520,6 +636,21 @@ class TestCollectLogs:
         logs = pipeline.collect_logs()
 
         assert logs["job.err"] == "error content"
+
+    def test_collects_error_output_files(self, mock_production, mock_config, temp_dir):
+        # simple_pe_pipe's own generated DAG nodes write .error/.output,
+        # not .err/.out -- confirmed directly via this plugin's own e2e CI.
+        mock_production.rundir = temp_dir
+        with open(os.path.join(temp_dir, "filter_20260101_01.error"), "w") as f:
+            f.write("filter node stderr")
+        with open(os.path.join(temp_dir, "filter_20260101_01.output"), "w") as f:
+            f.write("filter node stdout")
+
+        pipeline = SimplePE(mock_production)
+        logs = pipeline.collect_logs()
+
+        assert logs["filter_20260101_01.error"] == "filter node stderr"
+        assert logs["filter_20260101_01.output"] == "filter node stdout"
 
 
 class TestAfterCompletion:

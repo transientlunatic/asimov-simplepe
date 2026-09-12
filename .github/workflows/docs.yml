@@ -45,10 +45,12 @@ jobs:
   build:
     name: Build documentation
     runs-on: ubuntu-latest
-    # Only build+deploy on an actual push to main -- a pull_request run has
-    # no publishing destination and (from a fork) no write access to Pages
-    # anyway; lint-tutorials above still runs on every PR.
-    if: github.event_name == 'push'
+    # Only build+deploy on an actual push to main, or a manual dispatch --
+    # a pull_request run has no publishing destination and (from a fork)
+    # no write access to Pages anyway; lint-tutorials above still runs on
+    # every PR. Without workflow_dispatch here too, the trigger declared
+    # above would accept a manual run but this job would silently skip it.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     # Just reads the checkout and writes a local artifact; the actual Pages
     # write/OIDC token happens in the deploy job below.
     permissions:

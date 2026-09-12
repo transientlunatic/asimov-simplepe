@@ -54,7 +54,8 @@ available from conda-forge):
 ```bash
 conda install -c conda-forge pycbc lalsuite
 echo "setuptools<82" > constraints.txt  # see note below
-pip install -c constraints.txt "setuptools<82"
+echo "numpy<2" >> constraints.txt        # see note below
+pip install -c constraints.txt "setuptools<82" "numpy<2"
 pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
 ```
 
@@ -72,6 +73,22 @@ pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple
 > of its own transitive dependencies (also confirmed directly). A
 > constraints file applied to both commands, as above, is what actually
 > holds the pin.
+
+> **`numpy<2` note.** `simple_pe_filter`'s own
+> `load_trigger_parameters_from_file()` wraps the loaded trigger-parameters
+> dict in `SimplePESamples` (a pesummary-style samples container built for
+> posterior *chains*, so even a single scalar comes back as a shape-`(1,)`
+> array rather than a true 0-d array) before
+> `simple_pe.io.io.estimate_data_length_from_template_parameters` does
+> `int(2**(np.ceil(np.log2(wf_len))))` on a value derived from it. NumPy
+> hard-errors this exact implicit shape-`(1,)`-to-scalar conversion since
+> 2.0 (only a `DeprecationWarning` before that):
+> `TypeError: only 0-dimensional arrays can be converted to Python
+> scalars`, hit on every real analysis regardless of channel mode --
+> confirmed directly via this plugin's own e2e CI on the real `filter` DAG
+> node. Pinning `numpy<2` (alongside every pip install here, for the same
+> re-resolution reason as `setuptools` above) keeps it a warning instead
+> of a crash without touching `simple-pe`'s own source.
 
 > **A note on the config schema below.** The keys used by this plugin's
 > bundled template (`configs/simplepe.ini`) -- `trigger_time`,
@@ -194,9 +211,10 @@ trigger:
   psi: 0
 ```
 
-Any parameter left unset falls back to a sensible default (masses/sky
-location are otherwise left blank, spins/phase/psi default to 0, distance
-defaults to 400 Mpc); `time` is always taken from the event's `event time`.
+Any parameter left unset falls back to a sensible default: `mass1`/`mass2`
+default to 1.4 (solar masses), `ra`/`dec`/`spin1z`/`spin2z`/`phase`/`psi`
+default to 0, and `distance` defaults to 400 Mpc; `time` is always taken
+from the event's `event time`, not from this block.
 
 ### Post-processing
 
@@ -251,8 +269,11 @@ pytest
 ```
 
 `.github/workflows/e2e.yml` also runs a genuine end-to-end test: a real
-`simple_pe_pipe` DAG built and submitted through a real HTCondor scheduler,
-waiting for a real, parseable posterior samples file.
+`simple_pe_pipe` DAG built and submitted through a real HTCondor scheduler
+against real GW150914 GWOSC data, waiting for and validating the real
+`peak_parameters.json`/`peak_snrs.json` output its `analysis` node
+produces. It does *not* currently wait for a full posterior-samples file --
+see the "Known issue" note under *Post-processing* above for why.
 
 `.github/workflows/docs.yml` also checks that the subcommand and flags used
 by every `asimov ...` command shown in `docs/*.rst` still exist on the live,

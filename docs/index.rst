@@ -39,7 +39,8 @@ conda-forge, so install it from its GitLab repository (it depends on ``pycbc`` a
 
    conda install -c conda-forge pycbc lalsuite
    echo "setuptools<82" > constraints.txt  # see the pkg_resources note below
-   pip install -c constraints.txt "setuptools<82"
+   echo "numpy<2" >> constraints.txt        # see the numpy note below
+   pip install -c constraints.txt "setuptools<82" "numpy<2"
    pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
    pip install asimov-simplepe
 
@@ -49,7 +50,8 @@ From source:
 
    conda install -c conda-forge pycbc lalsuite
    echo "setuptools<82" > constraints.txt  # see the pkg_resources note below
-   pip install -c constraints.txt "setuptools<82"
+   echo "numpy<2" >> constraints.txt        # see the numpy note below
+   pip install -c constraints.txt "setuptools<82" "numpy<2"
    pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
    git clone https://github.com/transientlunatic/asimov-simplepe.git
    cd asimov-simplepe
@@ -82,6 +84,25 @@ From source:
    transitive dependencies (also confirmed directly). A constraints file
    applied to both commands, as shown above, is what actually holds the
    pin.
+
+.. note::
+
+   ``simple_pe_filter``'s own ``load_trigger_parameters_from_file()`` wraps
+   the loaded trigger-parameters dict in ``SimplePESamples`` (a
+   pesummary-style samples container built for posterior *chains*, so even
+   a single scalar comes back as a shape-``(1,)`` array rather than a true
+   0-d array) before
+   ``simple_pe.io.io.estimate_data_length_from_template_parameters`` does
+   ``int(2**(np.ceil(np.log2(wf_len))))`` on a value derived from it.
+   NumPy hard-errors this exact implicit shape-``(1,)``-to-scalar
+   conversion since 2.0 (only a ``DeprecationWarning`` before that):
+   ``TypeError: only 0-dimensional arrays can be converted to Python
+   scalars``, hit on every real analysis regardless of channel mode --
+   confirmed directly via this plugin's own end-to-end CI on the real
+   ``filter`` DAG node. Pinning ``numpy<2`` (alongside every pip install
+   here, for the same re-resolution reason as ``setuptools`` above) keeps
+   it a warning instead of a crash without touching ``simple-pe``'s own
+   source.
 
 Tutorial: from a fresh project to posterior samples
 ----------------------------------------------------
