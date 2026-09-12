@@ -374,6 +374,69 @@ jobs:
                 print(f'  contents:', data)
             "
 
+      # Non-blocking (never fails the job): reports whether
+      # scripts/patch_simple_pe_reweight_guard.py (applied during
+      # environment setup -- see its own docstring and README.md's
+      # "Known issue" for the full rationale) actually unblocks full
+      # posterior-sample generation against this real dataset, without
+      # yet making that a hard pass/fail requirement of this job. The
+      # patch's guard logic itself is exercised directly by a unit test
+      # under normal `pytest` -- this step is purely extra, real-world
+      # signal from an actual HTCondor run, checked before promoting it
+      # to a hard requirement (and updating this job's other steps/this
+      # repo's docs to match) in a follow-up change once confirmed.
+      - name: Check whether the reweighting patch unblocked full posterior samples
+        if: always()
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            python3 -c "
+            import os
+
+            rundir = 'working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test'
+            # Same broadest-match-first patterns as
+            # asimov_simplepe.simplepe.SimplePE.samples().
+            patterns = (
+                'posterior_samples.h5', 'posterior_samples.dat',
+                '*posterior*.h5', '*posterior*.dat',
+                '*samples*.h5', '*samples*.dat',
+            )
+            import glob
+            found = []
+            for pattern in patterns:
+                found = sorted(
+                    p for p in glob.glob(os.path.join(rundir, '**', pattern), recursive=True)
+                    if os.path.getsize(p) > 0
+                )
+                if found:
+                    break
+
+            if found:
+                print('PATCH RESULT: posterior samples file found:', found[0])
+                print('The reweighting guard appears to have unblocked full sample generation.')
+            else:
+                print('PATCH RESULT: no posterior samples file found under', rundir)
+                overflow_seen = False
+                for root, _dirs, files in os.walk(rundir):
+                    for name in files:
+                        if not (name.endswith('.error') or name.endswith('.output') or name.endswith('.log')):
+                            continue
+                        path = os.path.join(root, name)
+                        try:
+                            with open(path, errors='replace') as f:
+                                contents = f.read()
+                        except OSError:
+                            continue
+                        if 'OverflowError: Range exceeds valid bounds' in contents:
+                            overflow_seen = True
+                            print(f'  still seeing the known OverflowError in {path}')
+                if overflow_seen:
+                    print('The known pesummary reweighting OverflowError is still occurring; the patch did not (fully) fix it.')
+                else:
+                    print('No posterior samples and no known OverflowError signature either; something else may be going on -- see the dumped logs above.')
+            "
+
       - name: Archive artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4

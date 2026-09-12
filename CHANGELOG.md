@@ -342,6 +342,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own printed argument `Namespace` in CI.
 
 ### Added
+- `scripts/patch_simple_pe_reweight_guard.py`, a short-term stopgap for
+  the confirmed upstream `pesummary` reweighting `OverflowError`
+  documented under "Fixed" above (see the "e2e test: the completion
+  criterion..." entry). Reading `simple_pe_analysis`'s complete, real
+  argument list and `main()` (`simple_pe/cli/simple_pe_analysis.py`)
+  confirmed there is genuinely no CLI/ini-level way to disable or route
+  around its unconditional reweighting call -- so the only way to
+  actually unblock full posterior-sample generation in the short term,
+  rather than just fail cleanly (which is all the `resurrect()` fix
+  above does), is to patch the bug itself. The script patches an
+  installed `simple-pe`'s `reweight_based_on_observed_snrs()`
+  (`simple_pe/param_est/pe.py`) in place, zeroing out any non-finite
+  weight (`np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)`) before
+  it reaches `pesummary.core.reweight.rejection_sampling()` -- treating a
+  numerically broken sample (one whose subdominant-SNR calculation hit
+  the underlying divide-by-zero) as zero-probability (rejected) rather
+  than crashing the whole run, or -- worse -- as *certain* (an
+  unguarded `inf` weight always wins rejection sampling against every
+  finite-weight sample, which would silently produce a degenerate,
+  scientifically meaningless posterior even if it didn't crash first).
+  Verified directly: reproduces the real `OverflowError` unpatched and
+  confirms the guarded weights never select the broken (inf/nan) samples,
+  against the exact `rejection_sampling()` logic from a real, freshly
+  downloaded `pesummary` 1.7.0. The patch itself is idempotent (a no-op
+  if already applied) and, deliberately, is not a blind `sed`: it matches
+  the exact expected original source text and exits non-zero (rather
+  than silently no-opping) if that text isn't found, so a future upstream
+  change to this function surfaces as a clear CI failure instead of
+  quietly leaving the crash unpatched. It also takes care to preserve the
+  installed file's real CRLF line endings (confirmed directly: Python's
+  default text-mode I/O would otherwise silently rewrite the *entire*
+  file to LF on save, turning a small, precise one-function patch into a
+  spurious file-wide diff). This can't be a plugin-level Python
+  monkeypatch inside `asimov_simplepe` itself: the buggy code runs inside
+  `simple_pe_analysis`'s own HTCondor subprocess, a completely separate
+  Python process from asimov's, so patching the installed package is the
+  only mechanism that actually reaches it. `.github/actions/
+  setup-simplepe-env/action.yml` now applies this same script during
+  environment setup (once per freshly-populated conda-env cache, matching
+  the existing `setuptools`/`numpy` pin steps' pattern), and `e2e.yml`
+  gained a new, deliberately non-blocking diagnostic step that reports
+  whether this actually unblocks a real posterior-samples file against
+  real GWOSC data, ahead of promoting that to a hard pass/fail
+  requirement (and updating this plugin's own completion-criterion
+  claims to match) in a follow-up change once confirmed by a real run.
+  This is a stopgap, not a substitute for a real fix landing upstream in
+  either `simple-pe` or `pesummary` -- see README.md's "Short-term
+  workaround" note for user-facing instructions to apply the same patch
+  to a real deployment environment.
 - Initial release of the `asimov-simplepe` plugin, integrating
   [simple-pe](https://git.ligo.org/stephen-fairhurst/simple-pe) (a rapid,
   metric/Fisher-matrix-based parameter estimation code) with

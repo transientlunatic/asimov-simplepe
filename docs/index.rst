@@ -360,6 +360,37 @@ PESummary twice for no benefit.
    currently-achievable output directly rather than requiring a full
    posterior-samples file.
 
+   **Short-term workaround.** The correct fix belongs upstream (in either
+   ``simple-pe``, guarding the SNR calculation against the divide-by-zero
+   directly, or ``pesummary``, guarding ``rejection_sampling()`` itself,
+   since any of its other callers could hit the same crash) -- but until
+   one lands, this repo ships
+   ``scripts/patch_simple_pe_reweight_guard.py``, which patches an
+   installed ``simple-pe``'s ``reweight_based_on_observed_snrs()`` in
+   place to zero out any non-finite weight before it reaches
+   ``rejection_sampling()`` -- treating a numerically broken sample as
+   zero-probability (rejected) rather than crashing, or (worse) treating
+   it as certain. Run it once, in the same Python environment
+   ``simple_pe_analysis`` runs in, right after installing ``simple-pe``
+   and before running any real analysis:
+
+   .. code-block:: bash
+
+      python scripts/patch_simple_pe_reweight_guard.py
+
+   It's idempotent (a no-op if already applied) and fails loudly, rather
+   than silently doing nothing, if ``simple-pe``'s source has changed
+   enough that its exact expected original text can't be found -- see the
+   script's own docstring for the full rationale. This can't be applied
+   automatically by ``asimov_simplepe`` itself at import time: the buggy
+   code runs inside ``simple_pe_analysis``'s own HTCondor subprocess, a
+   completely separate Python process from asimov's, so a plugin-level
+   monkeypatch would never reach it -- it has to be applied to the
+   installed ``simple-pe`` package directly, in whatever environment
+   actually runs the analysis jobs. This plugin's own CI applies the
+   exact same script (see
+   ``.github/actions/setup-simplepe-env/action.yml``).
+
 .. toctree::
    :maxdepth: 2
    :caption: Reference
