@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `tests/test_blueprints/fake_event.yaml`'s `waveform.approximant` is now
-  `IMRPhenomXPHM`, not `IMRPhenomD` -- the actual root cause of the e2e
+  `IMRPhenomXHM`, not `IMRPhenomD` -- the actual root cause of the e2e
   test's reweighting crash, confirmed directly via this plugin's own
   e2e CI (not a genuine, unfixable upstream numerical-robustness bug as
   first assumed; see the entries below documenting that investigation).
@@ -28,11 +28,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GW150914's real, close distance -- real GW150914's SNR is ~24),
   underflows to exactly `0.0` probability in float64 for essentially
   every sample, not just outliers, corrupting the whole reweighting
-  step regardless of any inf/nan-weight guard. `IMRPhenomXPHM` matches
-  `simple_pe_filter`'s/`simple_pe_analysis`'s own `--approximant`
-  default (confirmed directly from their real source) and genuinely
-  supports higher modes and precession, so the observed SNRs it
-  produces are real, finite numbers instead of `NaN`.
+  step regardless of any inf/nan-weight guard.
+  - First tried `IMRPhenomXPHM` (`simple_pe_filter`'s/
+    `simple_pe_analysis`'s own `--approximant` default, confirmed
+    directly from their real source): this did fix the same NaN-SNR
+    root cause (also confirmed directly -- no more `NaN` higher-mode
+    SNRs, and neither of the previously-seen crashes recurred), but its
+    precessing+HM interpolation grids (`alpha_lm_grid`/`beta_22_grid`/
+    `sigma_22_grid`, each built from real waveform generation across a
+    5-point grid per direction) got the real `analysis` HTCondor job
+    `SIGKILL`'d -- confirmed directly: HTCondor's own accounting showed
+    the job allocated its full 8192 MB partitionable-slot request
+    before being killed, consistent with an out-of-memory kill in this
+    CI container.
+  - `IMRPhenomXHM` keeps the higher-multipole support that fixes the
+    NaN-SNR root cause while dropping precession (and its
+    `beta_22_grid`), meaningfully cheaper to evaluate -- confirmed
+    non-precessing via `simple_pe.waveforms.waveform.
+    precessing_approximant()`, which queries LALSimulation's own real
+    spin-support metadata for the approximant rather than guessing from
+    its name.
 - `resurrect()` now raises `PipelineException` instead of silently
   returning `None` once it can no longer usefully resubmit the DAG.
   Asimov's monitor loop (`RunningState._handle_no_condor_job` in asimov
