@@ -292,6 +292,41 @@ jobs:
           interval: "10"
           working-directory: "e2e_project"
 
+      # Deliberately non-blocking (continue-on-error: true): this waits
+      # for the real, final output of scripts/patch_simple_pe_reweight_guard.py
+      # actually working -- posterior_samples.dat, the exact filename
+      # hardcoded in simple_pe_analysis's own main() -- but that's not a
+      # confirmed-reliable output yet (that's the whole open question),
+      # so a timeout here must not fail the job.
+      #
+      # This step exists because peak_parameters.json/peak_snrs.json
+      # above appear early (right after the Fisher-matrix point-estimate
+      # stage, well before reweighting is even attempted) and the job's
+      # remaining steps run immediately afterward with no further
+      # waiting -- confirmed directly via a real run: the whole job
+      # (including this "analysis" node's own submission) finished in
+      # under 15 seconds after the analysis node was even submitted,
+      # nowhere near enough real wall-clock time for the actual
+      # sample-generation loop to complete, so the container was torn
+      # down mid-analysis with no real signal either way. Without an
+      # explicit wait here, "no crash observed" is indistinguishable
+      # from "never got far enough to crash or succeed."
+      # Only posterior_samples.dat, not also .h5: wait-for-files requires
+      # every listed pattern to match (confirmed directly from its own
+      # script, per the comment on the peak-parameters wait step above),
+      # and simple_pe_analysis's own main() (confirmed directly from its
+      # real source) hardcodes `file_format="dat"` with no .h5 branch --
+      # requiring both would time out even on a genuine success.
+      - name: Wait for the real reweighted posterior samples (best-effort)
+        continue-on-error: true
+        uses: etive-io/actions/wait-for-files@v1
+        with:
+          patterns: "posterior_samples.dat"
+          directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/output"
+          timeout: "900"
+          interval: "15"
+          working-directory: "e2e_project"
+
       # Unconditional (not just on failure): a real run got this far and
       # only ever produced datafind_*.{error,output,log} -- the DAG's
       # engine/analysis node never started producing output in the
@@ -385,6 +420,27 @@ jobs:
       # signal from an actual HTCondor run, checked before promoting it
       # to a hard requirement (and updating this job's other steps/this
       # repo's docs to match) in a follow-up change once confirmed.
+      #
+      # Deliberately narrower than asimov_simplepe.simplepe.SimplePE.
+      # samples()'s own broadest-match-first glob (which also tries
+      # `*samples*.dat`/`*samples*.h5`): that broader match is right for
+      # "has this long-lived production ever finished, at any point",
+      # but wrong here, where it produced a real false positive --
+      # `*samples*.dat` matched `metric_samples.dat`, an intermediate
+      # file written early in the very first sampling-loop iteration,
+      # long before reweighting is ever attempted (confirmed directly: a
+      # real run reported this as if it were the final output). It
+      # exists at all regardless of this ini's `save_metric = False`
+      # because of a separate, genuine upstream `simple_pe_pipe` bug --
+      # it renders `--save_metric False` as a literal string argument
+      # for what `simple_pe_analysis` declares as an `action="store_true"`
+      # flag, which argparse's `parse_known_args` then silently
+      # interprets as "flag present" (`True`), discarding the trailing
+      # "False" token as an unrecognised positional argument (confirmed
+      # directly by reproducing this exact argparse behaviour). Only the
+      # exact filename `simple_pe_analysis`'s own `main()` hardcodes for
+      # its final reweighted output, or a name that still says
+      # "posterior", counts as real evidence here.
       - name: Check whether the reweighting patch unblocked full posterior samples
         if: always()
         uses: etive-io/actions/run-asimov-command@v1
@@ -395,12 +451,9 @@ jobs:
             import os
 
             rundir = 'working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test'
-            # Same broadest-match-first patterns as
-            # asimov_simplepe.simplepe.SimplePE.samples().
             patterns = (
                 'posterior_samples.h5', 'posterior_samples.dat',
                 '*posterior*.h5', '*posterior*.dat',
-                '*samples*.h5', '*samples*.dat',
             )
             import glob
             found = []
