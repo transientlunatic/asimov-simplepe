@@ -1,0 +1,2 @@
+conda-forge::pycbc
+conda-forge::lalsuite

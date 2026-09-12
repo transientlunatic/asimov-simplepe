@@ -1,0 +1,290 @@
+# asimov-simplepe
+
+An [Asimov](https://github.com/etive-io/asimov) plugin for running
+[simple-pe](https://git.ligo.org/stephen-fairhurst/simple-pe), a rapid,
+metric/Fisher-matrix-based parameter estimation code for gravitational-wave
+signals from compact binary coalescences.
+
+📚 **[Full documentation and tutorial](https://transientlunatic.github.io/asimov-simplepe/)**
+
+## Overview
+
+Unlike a full stochastic (MCMC/nested-sampling) parameter estimation
+pipeline, `simple-pe` expands the likelihood locally around a matched-filter
+trigger to produce an approximate posterior in CPU-minutes rather than
+CPU-days -- useful for low-latency estimates, and as a fast cross-check or
+seed for a more detailed run. This plugin enables Asimov to build and submit
+`simple_pe_pipe` jobs for that analysis. It provides:
+
+- **Configuration templating**: renders a `simple_pe_pipe` config file from
+  a bundled Liquid template, populated from a production's ledger metadata
+  (`config_template`), for use by `asimov manage build`.
+- **Trigger-parameter seeding**: writes the small `trigger_parameters.json`
+  file `simple_pe_pipe` uses to seed its local optimisation, before the
+  main config is rendered.
+- **DAG generation and scheduler integration**: `simple_pe_pipe` builds a
+  real HTCondor DAG (plus a companion local-run bash script); this plugin
+  submits that DAG via Asimov's own scheduler abstraction (`self.scheduler`,
+  from `asimov.pipeline.Pipeline`), which supports both HTCondor and
+  Slurm -- rather than talking to a scheduler's API directly.
+- **Status tracking**: monitors job completion by checking for a genuine
+  posterior samples file.
+- **DAG-rescue-aware resurrection**: like `lalinference_pipe`,
+  `simple_pe_pipe` produces a real DAGMan workflow; an interrupted run
+  leaves a rescue DAG behind, which is resubmitted automatically.
+- **Dependency-driven post-processing**: once a job completes, its samples
+  are available (via `collect_assets()`) to any downstream production with
+  a `needs:` dependency on it -- for example an
+  [asimov-pesummary](https://github.com/etive-io/asimov-pesummary)
+  production. This plugin doesn't submit that job itself; Asimov's own
+  dependency resolution does.
+
+## Compatibility
+
+Requires `asimov>=0.7`. This plugin does not depend on the `simple-pe`
+Python package itself -- like the sibling `asimov-lalinference` and
+`asimov-bayeswave` plugins, it shells out to the `simple_pe_pipe`
+executable, which is expected to be installed separately in the environment
+pointed at by Asimov's `[pipelines] environment` config option.
+
+`simple-pe` is not currently distributed on PyPI or conda-forge; install it
+from its GitLab repository (it depends on `pycbc` and `lalsuite`, both
+available from conda-forge):
+
+```bash
+conda install -c conda-forge pycbc lalsuite
+echo "setuptools<82" > constraints.txt  # see note below
+echo "numpy<2" >> constraints.txt        # see note below
+pip install -c constraints.txt "setuptools<82" "numpy<2"
+pip install -c constraints.txt git+https://git.ligo.org/stephen-fairhurst/simple-pe.git
+```
+
+> **`pkg_resources` note.** `simple_pe_pipe` imports `pycbc.waveform`, which
+> does a bare `import pkg_resources` in `retrieve_waveform_plugins()` (see
+> [simple-pe issue #29](https://git.ligo.org/stephen-fairhurst/simple-pe/-/issues/29),
+> still open upstream). `setuptools` removed the bundled `pkg_resources`
+> module starting with 82.0.0 (confirmed directly: 81.0.0 still provides
+> it, 82.0.0 doesn't), so `simple_pe_pipe` fails to even import with
+> `ModuleNotFoundError: No module named 'pkg_resources'` against an
+> unpinned (or too-recent) `setuptools` -- confirmed directly via this
+> plugin's own CI. A bare `pip install "setuptools<82"` isn't enough on
+> its own, either: installing `simple-pe` in a *separate* `pip install`
+> right after it can silently re-resolve `setuptools` back past 82 as one
+> of its own transitive dependencies (also confirmed directly). A
+> constraints file applied to both commands, as above, is what actually
+> holds the pin.
+
+> **`numpy<2` note.** `simple_pe_filter`'s own
+> `load_trigger_parameters_from_file()` wraps the loaded trigger-parameters
+> dict in `SimplePESamples` (a pesummary-style samples container built for
+> posterior *chains*, so even a single scalar comes back as a shape-`(1,)`
+> array rather than a true 0-d array) before
+> `simple_pe.io.io.estimate_data_length_from_template_parameters` does
+> `int(2**(np.ceil(np.log2(wf_len))))` on a value derived from it. NumPy
+> hard-errors this exact implicit shape-`(1,)`-to-scalar conversion since
+> 2.0 (only a `DeprecationWarning` before that):
+> `TypeError: only 0-dimensional arrays can be converted to Python
+> scalars`, hit on every real analysis regardless of channel mode --
+> confirmed directly via this plugin's own e2e CI on the real `filter` DAG
+> node. Pinning `numpy<2` (alongside every pip install here, for the same
+> re-resolution reason as `setuptools` above) keeps it a warning instead
+> of a crash without touching `simple-pe`'s own source.
+
+> **A note on the config schema below.** The keys used by this plugin's
+> bundled template (`configs/simplepe.ini`) -- `trigger_time`,
+> `trigger_parameters`, `outdir`, `channels`, `asd`, `f_low`, `f_high`,
+> `approximant`, `accounting_group`, `accounting_group_user`,
+> `generate_corner` -- and their value formats are confirmed directly
+> against a real, live `simple_pe_pipe --help` and a real successful DAG
+> build in this plugin's own end-to-end CI. Its output-file detection
+> (`samples()`) is still an unconfirmed best-effort guess, though: it
+> searches for common posterior/samples filenames rather than one exact
+> confirmed name. If you hit a mismatch there (or anywhere else) against a
+> real `simple_pe_pipe` release, please open an issue or PR.
+
+## Installation
+
+```bash
+pip install asimov-simplepe
+```
+
+For development:
+```bash
+git clone https://github.com/transientlunatic/asimov-simplepe
+cd asimov-simplepe
+pip install -e ".[test]"
+```
+
+## Usage
+
+Once installed, Asimov discovers this plugin automatically via its
+`asimov.pipelines` entry point. Add a production to an event with
+`pipeline: simplepe`:
+
+```yaml
+kind: analysis
+name: simplepe-imrphenomxphm
+pipeline: simplepe
+waveform:
+  approximant: IMRPhenomXPHM
+likelihood:
+  minimum frequency:
+    H1: 20
+    L1: 20
+scheduler:
+  accounting group: ligo.dev.o4.cbc.pe.simple_pe
+```
+
+`asimov manage build submit` will render a `simple_pe_pipe` ini (and the
+accompanying trigger-parameters file) from the bundled template (unless a
+config already exists in the event repository), build a DAG, and submit it.
+
+### Peak finder
+
+`peak_finder` (default `metric`, simple-pe's own Fisher-matrix algorithm)
+selects the peak-finding method `simple_pe_pipe` uses, e.g. `production.meta['peak_finder']: scipy`.
+This isn't optional in practice: `simple_pe_pipe`'s real `--peak_finder`
+CLI option defaults to an *empty list*, and its DAG-building code creates
+every actual analysis stage (the match-filter, metric, corner-plot, and
+PESummary jobs) inside a loop over that list -- an empty list means the
+loop runs zero times and the DAG silently ends up containing only its
+`datafind` job, no error of any kind. Confirmed directly via this
+plugin's own e2e CI, which is why this template always sets it.
+
+### Data
+
+Strain data is read from a production's `data` metadata, using the same
+conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
+`asimov-gwdata`, `asimov-lalinference`, `asimov-pycbc`):
+
+- `data.channels` -- per-interferometer strain channel name, *without*
+  the leading `IFO:` (this plugin adds that itself when rendering the
+  ini). `simple_pe_pipe` also recognises two special values here,
+  confirmed directly from its own `--help` text: `GWOSC` to read public
+  GWOSC open data instead of a private frame channel (this plugin's own
+  end-to-end test uses this, against GW150914's real data), and `INJ`
+  to have `simple_pe_pipe` simulate an injection itself rather than
+  reading any real strain data at all -- no datafind access needed.
+  When any interferometer uses `INJ`, `before_config()` also writes an
+  `injection.json` file from the production's `trigger` metadata and
+  the ini references it via `injection = ...` -- `simple_pe_datafind`
+  requires this unconditionally in that case (confirmed directly from
+  its real source, via this plugin's own e2e CI). **Known issue:**
+  `INJ` mode currently hits a genuine upstream `simple-pe` bug once
+  `write_converted_injection_parameters()` runs (a `SimplePESamples`-
+  wrapped value eventually produces a NaN GPS time, sending LALSuite
+  into what is for all practical purposes an infinite loop) --
+  confirmed directly via this plugin's own e2e CI (see `CHANGELOG.md`
+  for the full trail); this plugin's own code fully supports `INJ`
+  (unit-tested) and will use it correctly once fixed upstream, but the
+  e2e test itself uses `GWOSC` instead to avoid depending on that fix.
+- `data.asd` -- per-interferometer path to a real, two-column (frequency,
+  ASD) text file. There is no analytic-PSD-model-name shortcut here --
+  confirmed directly from `--help` ("ASD files to use for the analysis")
+  and from this plugin's own e2e CI, which generates a real file from
+  pycbc's analytic `aLIGOZeroDetHighPower` model for its test (a PSD is
+  needed for the Fisher-matrix/SNR calculation regardless of where the
+  strain data itself comes from).
+
+This means a production populated by a data-retrieval step (for example
+[asimov-gwdata](https://github.com/etive-io/asimov-gwdata)) can be picked
+up by making the `simplepe` production `needs:` that data-retrieval
+production and mapping its output into `data.channels`/`data.asd` (stripping
+the data-retrieval step's own `IFO:` channel prefix, if it includes one).
+
+### Trigger parameters
+
+`simple_pe_pipe` seeds its local optimisation from an approximate set of
+trigger parameters (masses, spins, sky location). Supply these via a
+`trigger` block on the production:
+
+```yaml
+trigger:
+  mass1: 36
+  mass2: 29
+  spin1z: 0.0
+  spin2z: 0.0
+  ra: 1.95
+  dec: -1.27
+  distance: 440
+  phase: 0
+  psi: 0
+```
+
+Any parameter left unset falls back to a sensible default: `mass1`/`mass2`
+default to 1.4 (solar masses), `ra`/`dec`/`spin1z`/`spin2z`/`phase`/`psi`
+default to 0, and `distance` defaults to 400 Mpc; `time` is always taken
+from the event's `event time`, not from this block.
+
+### Post-processing
+
+This plugin does not run PESummary (or anything else) itself. When a
+`simplepe` production completes, `after_completion()` only marks it
+`finished` -- post-processing is expressed as a separate production with a
+`needs:` dependency on it, e.g.:
+
+```yaml
+kind: analysis
+name: simplepe-test-pesummary
+pipeline: pesummary
+needs:
+  - simplepe-imrphenomxphm
+postprocessing:
+  pesummary:
+    multiprocess: 2
+```
+
+Asimov's own dependency resolution builds and submits
+`simplepe-test-pesummary` once `simplepe-imrphenomxphm` reaches `finished`;
+PESummary picks up its samples via `simplepe-imrphenomxphm`'s
+`collect_assets()` (through `production._previous_assets()`).
+
+**Known issue:** `simple_pe_pipe`'s own `analysis` stage currently hits a
+genuine upstream numerical-robustness bug -- unrelated to the `INJ`-mode
+issue above, and hit on every real analysis regardless of channel mode --
+before it can produce a posterior samples file: PESummary's subdominant-
+multipole rejection-sampling reweighting
+(`pesummary.core.reweight.rejection_sampling()`, called unconditionally
+from `simple_pe.param_est.pe.reweight_based_on_observed_snrs()`) has no
+guard against a non-finite weight, and raises `OverflowError: Range
+exceeds valid bounds` when one occurs -- confirmed directly via this
+plugin's own e2e CI against real GW150914 GWOSC data (see `CHANGELOG.md`
+for the full trail). There is no CLI flag to disable or adjust this
+reweighting step, so it isn't something this plugin's ini/config
+rendering can work around. This plugin's own DAG building and submission
+are confirmed correct up to this point -- `datafind`, `filter`, and
+`analysis`'s own Fisher-matrix metric peak-finding and SNR computation
+all complete successfully, writing real `peak_parameters.json`/
+`peak_snrs.json` output -- so the e2e test verifies that real,
+currently-achievable output directly rather than requiring a full
+posterior-samples file.
+
+## Testing
+
+Unit tests (mocked, no external dependencies):
+
+```bash
+pip install -e ".[test]"
+pytest
+```
+
+`.github/workflows/e2e.yml` also runs a genuine end-to-end test: a real
+`simple_pe_pipe` DAG built and submitted through a real HTCondor scheduler
+against real GW150914 GWOSC data, waiting for and validating the real
+`peak_parameters.json`/`peak_snrs.json` output its `analysis` node
+produces. It does *not* currently wait for a full posterior-samples file --
+see the "Known issue" note under *Post-processing* above for why.
+
+`.github/workflows/docs.yml` also checks that the subcommand and flags used
+by every `asimov ...` command shown in `docs/*.rst` still exist on the live,
+installed asimov CLI, on every pull request
+(`scripts/lint_tutorial_commands.py`).
+
+## Contributing
+
+Contributions welcome! Please submit issues or pull requests to
+[transientlunatic/asimov-simplepe](https://github.com/transientlunatic/asimov-simplepe).
+
+## License
+
+MIT -- see [LICENSE](LICENSE).

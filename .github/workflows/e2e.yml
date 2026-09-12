@@ -1,0 +1,387 @@
+name: End-to-end test (real simple_pe_pipe)
+
+on:
+  # Only push to main (post-merge validation) and pull_request runs --
+  # not every push to every branch/tag. This is a real ~30-minute job
+  # against a real HTCondor scheduler and real GWOSC network access, so
+  # running it on every branch push (as opposed to a branch that's part
+  # of an open PR, which pull_request already covers) burns substantial
+  # runner time and adds real-network flakiness to routine, in-progress
+  # development pushes that aren't ready for review yet.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: "Simple-PE end-to-end test (HTCondor)"
+    runs-on: ubuntu-latest
+    # See tests/README-e2e note below and the "Dump simple_pe_pipe --help"
+    # step: simple_pe_pipe's exact CLI/ini schema isn't fully documented
+    # publicly, so this job is deliberately bounded rather than left to a
+    # default multi-hour ceiling if an assumption about its behaviour turns
+    # out to be wrong (e.g. it hangs waiting on real GWOSC/datafind access
+    # instead of using the simulated ASD this test configures).
+    timeout-minutes: 30
+    container:
+      image: htcondor/mini:latest
+      options: --privileged
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: etive-io/actions/setup-htcondor@v1
+
+      - name: Install base tools
+        run: |
+          yum install -y sudo git
+
+      - name: Create submit user
+        uses: etive-io/actions/create-submit-user@v1
+
+      - name: Ensure submituser can access workspace
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/e2e_project"
+          chmod -R a+rwX "$GITHUB_WORKSPACE"
+
+      - name: Setup asimov-simplepe Environment
+        uses: ./.github/actions/setup-simplepe-env
+        with:
+          python-version: "3.11"
+
+      # simple_pe_pipe's real CLI/ini schema isn't fully documented
+      # publicly; this plugin's config_template and build_dag() are a
+      # best-effort match against simple-pe's own public documentation and
+      # issue tracker (see README's Compatibility note). Dumping --help
+      # unconditionally (not gated on anything downstream succeeding) means
+      # a wrong assumption shows up here, in the log, rather than only as
+      # an opaque downstream failure.
+      - name: Dump simple_pe_pipe --help for diagnostics
+        run: |
+          simple_pe_pipe --help || true
+
+      # `--asd`/`--psd` are real file paths, not analytic-model names --
+      # confirmed directly from `--help` ("ASD files to use for the
+      # analysis") and from a real e2e run: passing the analytic model name
+      # `aLIGOZeroDetHighPower` as if it were a magic value crashed with
+      # `FileNotFoundError: aLIGOZeroDetHighPower not found.` inside
+      # `numpy.loadtxt()` (via `pycbc.psd.read.from_txt()`), because
+      # `simple_pe_datafind` opens whatever string is given as a literal
+      # path. There's no built-in analytic-PSD shortcut in the CLI, so
+      # generate a real two-column (frequency, ASD) text file with pycbc's
+      # own `aLIGOZeroDetHighPower` analytic model -- pycbc is already
+      # installed here as a simple-pe dependency -- rather than committing
+      # a static data file to the repo.
+      #
+      # Written under $GITHUB_WORKSPACE/e2e_project, not /tmp: a real e2e
+      # run confirmed the `filter` DAG node (unlike `datafind`, which
+      # declares `universe = "local"` and so shares the submit host's
+      # normal filesystem) can't see /tmp at all --
+      # `FileNotFoundError: /tmp/aLIGO_asd.txt not found.` -- consistent
+      # with HTCondor's default (non-local-universe) jobs running in a
+      # sandboxed execute directory that doesn't include /tmp. Every
+      # other input file this plugin/simple_pe_pipe uses already lives
+      # under the project's own working directory tree and is read by
+      # those same jobs without issue, so this file goes there too.
+      - name: Generate a real ASD file for the e2e test
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import numpy as np
+          from pycbc.psd import aLIGOZeroDetHighPower
+
+          delta_f = 0.25
+          f_high = 2048
+          low_freq_cutoff = 1.0
+          flen = int(f_high / delta_f) + 1
+
+          psd = aLIGOZeroDetHighPower(flen, delta_f, low_freq_cutoff)
+          freqs = psd.sample_frequencies.numpy()
+          asd = np.sqrt(psd.numpy())
+
+          mask = freqs >= low_freq_cutoff
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "e2e_project", "aLIGO_asd.txt")
+          np.savetxt(path, np.column_stack([freqs[mask], asd[mask]]))
+          PYEOF
+          chmod a+r "$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt"
+          echo "--- head of generated ASD file ---"
+          head -5 "$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt"
+
+      # tests/test_blueprints/simplepe_production.yaml is a static,
+      # committed file, so it can't reference $GITHUB_WORKSPACE directly --
+      # it instead carries the literal placeholder `__ASD_PATH__`,
+      # substituted here with this runner's real, absolute ASD path. A
+      # plain `run:` step (not etive-io/actions/run-asimov-command), since
+      # that action wraps its script in an unquoted `su - submituser
+      # <<SUBMITUSER` heredoc that expands `$GITHUB_WORKSPACE` against the
+      # outer root shell (where it's typically unset) before the heredoc
+      # body reaches submituser's shell -- this needs the variable
+      # expanded normally, in the step's own shell.
+      - name: Render test blueprint with the real ASD path
+        run: |
+          sed "s|__ASD_PATH__|$GITHUB_WORKSPACE/e2e_project/aLIGO_asd.txt|g" \
+            "$GITHUB_WORKSPACE/tests/test_blueprints/simplepe_production.yaml" \
+            > "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml"
+          chmod a+r "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml"
+          echo "--- rendered test blueprint ---"
+          cat "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml"
+
+      - name: Set up git
+        run: |
+          su - submituser <<SUBMITUSER
+          set -euo pipefail
+          git config --global init.defaultBranch master
+          git config --global user.email "you@example.com"
+          git config --global user.name "Your Name"
+          SUBMITUSER
+
+      - name: Create asimov project
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: cd e2e_project && asimov init "E2E Test Project"
+
+      - name: Configure asimov environment and condor user
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            if [ -z "$CONDA_PREFIX" ] || [ ! -x "$CONDA_PREFIX/bin/simple_pe_pipe" ]; then
+              echo "::error::CONDA_PREFIX ('$CONDA_PREFIX') does not contain bin/simple_pe_pipe" >&2
+              exit 1
+            fi
+            asimov configuration update pipelines/environment "$CONDA_PREFIX"
+            asimov configuration update condor/user submituser
+
+      - name: Diagnose asimov.pipelines entry-point discovery as submituser
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            python3 -c "
+            from importlib.metadata import entry_points
+            eps = [ep for ep in entry_points(group='asimov.pipelines') if ep.value.startswith('asimov_simplepe')]
+            print('Discovered asimov_simplepe entry points:', eps)
+            for ep in eps:
+                try:
+                    ep.load()
+                    print(f'  {ep.name}: loaded OK')
+                except Exception as e:
+                    print(f'  {ep.name}: FAILED TO LOAD: {e!r}')
+            "
+
+      - name: Apply fake event
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            asimov apply -f "$GITHUB_WORKSPACE/tests/test_blueprints/fake_event.yaml"
+
+      # This exercises the real plugin end to end, including its own
+      # config_template rendering and before_config() trigger-parameters
+      # generation -- unlike the sibling asimov-pycbc/asimov-lalinference
+      # e2e tests, which pre-seed a hand-validated ini (something that
+      # would require running the real simple_pe_pipe interactively first,
+      # which isn't possible in the environment this plugin was authored
+      # in -- see README's Compatibility note). This production requests
+      # real GWOSC strain data for GW150914 via `data.channels: GWOSC`
+      # (see simplepe_production.yaml's comment for why not a simulated
+      # INJ injection instead), so this step does real network I/O to
+      # GWOSC's public data servers -- not just a local/simulated run.
+      - name: Add and build the real Simple-PE production
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            asimov apply -f "$GITHUB_WORKSPACE/e2e_project/simplepe_production.rendered.yaml" -e FAKE_SIMPLEPE_TEST_EVENT
+            asimov manage build submit
+
+      - name: Inspect the rendered config and generated DAG
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            echo "--- rendered ini ---"
+            find checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses -maxdepth 1
+            cat checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses/simplepe-test.ini || true
+            echo "--- rundir ---"
+            find working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test -maxdepth 2 || true
+            echo "--- trigger_parameters.json ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/trigger_parameters.json || true
+            # A prior real run showed the datafind node completing with exit
+            # status 0 (real GWOSC data fetched successfully for both H1 and
+            # L1) and DAGMan itself EXITING WITH STATUS 0 -- but the DAG only
+            # ever contained "1 total nodes" (just datafind), and no
+            # posterior samples file ever appeared. --help documents that
+            # pesummary post-processing runs *by default* (unless
+            # --disable_pesummary is passed, which this ini doesn't) and
+            # --generate_corner (set True here) should add a
+            # simple_pe_corner node -- so the DAG apparently should contain
+            # more than one node. Dump the real .dag file and the companion
+            # local-run bash script (both already confirmed to exist from
+            # the submit/ directory listing) to see the actual node
+            # structure simple_pe_pipe built, rather than guessing why.
+            echo "--- submit/*.dag (the real DAG structure) ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/submit/*.dag || true
+            echo "--- submit/bash_simple_pe.sh (the companion local-run script) ---"
+            cat working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/submit/bash_simple_pe.sh || true
+
+      # A genuine upstream numerical-robustness bug in simple-pe/PESummary's
+      # own subdominant-multipole reweighting code currently prevents this
+      # production from ever reaching a full posterior-samples file against
+      # this real GWOSC dataset -- confirmed directly via this plugin's own
+      # e2e CI: `pesummary.core.reweight.rejection_sampling()` does
+      # `np.random.uniform(0, np.max(weights), len(weights))` with no guard
+      # against an `inf` weight (produced by a divide-by-zero encountered
+      # upstream in the subdominant-SNR calculation, confirmed from the
+      # RuntimeWarning immediately preceding it in the real traceback),
+      # raising `OverflowError: Range exceeds valid bounds`. There is no
+      # documented CLI flag to disable or adjust this reweighting step
+      # (`--seed`/`--neffective`/`--nsamples`, confirmed from `--help`,
+      # don't touch it), so this isn't something this plugin's ini/config
+      # can work around (see CHANGELOG.md for the full trail).
+      #
+      # What IS confirmed to work end-to-end, for real, against this exact
+      # real dataset: `datafind` and `filter` both complete successfully,
+      # and `analysis` genuinely runs its real Fisher-matrix metric
+      # peak-finding and SNR computation through to completion, writing its
+      # real point-estimate results (`peak_parameters.json`/
+      # `peak_snrs.json`) before the later, separate
+      # reweighting/posterior-sample-generation step hits the bug above.
+      # That's the real, currently-achievable completion signal for this
+      # plugin's own e2e test -- not a downgraded smoke-test proxy, but the
+      # actual scientific output of the stage of the pipeline this
+      # plugin's own code (config rendering, DAG build, submission) is
+      # responsible for getting right. `asimov_simplepe`'s own
+      # `detect_completion()`/`samples()` are deliberately NOT changed to
+      # accept this as "finished": a real production that never produces
+      # posterior samples should keep reporting non-finished status, so
+      # this e2e test verifies the DAG's real on-disk output directly
+      # instead of going through `asimov monitor`/status machinery (which
+      # is already covered by this plugin's own unit tests).
+      - name: Wait for real analysis output (peak parameters/SNRs)
+        uses: etive-io/actions/wait-for-files@v1
+        with:
+          # Space-separated, not comma-separated: wait-for-files' own
+          # script only splits its `patterns` input on whitespace
+          # (`tr ' \t' '\n'`) -- confirmed directly from a real run's
+          # dumped step script, where a comma-joined list here was
+          # silently treated as one single, never-matching literal
+          # pattern (every poll logged "0/1 patterns matched").
+          #
+          # `directory` points at .../simplepe-test/output, not
+          # .../simplepe-test itself: wait-for-files matches patterns
+          # directly inside `directory` (non-recursively), and
+          # `simple_pe_analysis` writes peak_parameters.json/
+          # peak_snrs.json into its own `output/` subdirectory, not the
+          # rundir root -- confirmed directly from a real e2e run, whose
+          # post-timeout `ls -R` dump showed both files present the
+          # entire time, under output/, while this step polled "0/2
+          # patterns matched" for the full 600s because it was only ever
+          # looking in the parent directory.
+          patterns: "peak_parameters.json peak_snrs.json"
+          directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/output"
+          timeout: "600"
+          interval: "10"
+          working-directory: "e2e_project"
+
+      # Unconditional (not just on failure): a real run got this far and
+      # only ever produced datafind_*.{error,output,log} -- the DAG's
+      # engine/analysis node never started producing output in the
+      # allotted time. Dumping DAGMan's own log and the datafind node's
+      # output here means the *reason* shows up directly in this job's
+      # log, rather than only in the on-failure artifact upload (which
+      # needs a separate download-and-unzip round trip to read at all).
+      #
+      # No shell variables in this script: etive-io/actions/run-asimov-command
+      # wraps it in `su - submituser <<SUBMITUSER ... SUBMITUSER` with an
+      # *unquoted* heredoc delimiter, which expands any `$var` here against
+      # the outer root shell (where it's unset) before the heredoc body ever
+      # reaches submituser's shell -- confirmed directly: an earlier version
+      # of this step used a `for f in ...; do cat "$f"; done` loop and
+      # produced zero output despite the target files existing, for exactly
+      # this reason (the same class of bug documented in the sibling
+      # asimov-pycbc e2e.yml). `cat`'s own multi-file globbing needs no
+      # variable at all.
+      - name: Dump DAGMan and node logs for diagnostics
+        if: always()
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project/working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test || true
+            echo "--- dagman.out ---"
+            cat submit/*.dag.dagman.out || true
+            echo "--- nodes.log ---"
+            cat submit/*.dag.nodes.log || true
+            echo "--- log/*.log ---"
+            cat log/*.log || true
+            echo "--- output/*.output ---"
+            cat output/*.output || true
+            echo "--- error/*.error ---"
+            cat error/*.error || true
+
+      # Re-run simple_pe_pipe directly against the exact same
+      # already-rendered ini to see its own diagnostic output
+      # (logger.info(opts)'s full parsed Namespace dump) first-hand.
+      - name: Re-run simple_pe_pipe directly to see its own diagnostic output
+        if: always()
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            simple_pe_pipe checkouts/FAKE_SIMPLEPE_TEST_EVENT/analyses/simplepe-test.ini || true
+
+      # Deliberately does NOT run `asimov monitor` or check the ledger for
+      # `status: finished`: this production's DAG can never reach that
+      # status against this real dataset, because of the confirmed
+      # upstream PESummary reweighting bug documented above -- and
+      # `asimov monitor` calling this plugin's `resurrect()` against a DAG
+      # stuck past a permanently-failed node risks retrying (condor
+      # rescue-DAG resubmission) for no benefit, burning into this job's
+      # 30-minute budget for no benefit. What this plugin is actually
+      # responsible for -- rendering a correct ini, building a correct DAG,
+      # and submitting it such that HTCondor runs real simple_pe_pipe
+      # stages to completion -- is verified directly against the DAG's own
+      # real on-disk output instead.
+      - name: Verify the real analysis output is genuinely readable
+        uses: etive-io/actions/run-asimov-command@v1
+        with:
+          script: |
+            cd e2e_project
+            python3 -c "
+            import json
+            import os
+
+            rundir = 'working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test'
+            for name in ('peak_parameters.json', 'peak_snrs.json'):
+                candidates = []
+                for root, _dirs, files in os.walk(rundir):
+                    if name in files:
+                        candidates.append(os.path.join(root, name))
+                assert candidates, f'No {name} found under {rundir}'
+                path = sorted(candidates)[0]
+                with open(path) as f:
+                    data = json.load(f)
+                assert data, f'{path} is empty'
+                print(f'Found {name}:', path)
+                print(f'  contents:', data)
+            "
+
+      - name: Archive artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-debug
+          path: |
+            e2e_project/.asimov/
+            e2e_project/working/
+            e2e_project/checkouts/
+            e2e_project/pages/
+          retention-days: 5

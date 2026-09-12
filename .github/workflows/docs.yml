@@ -1,0 +1,88 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Scoped by ref rather than a single global "pages" group: every push to
+# main shares one group (so deploys still serialize against each other),
+# but each pull_request ref gets its own group, so PR lint/build runs don't
+# needlessly queue behind unrelated PRs or behind main's deploy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lint-tutorials:
+    name: Lint tutorial CLI usage
+    runs-on: ubuntu-latest
+    # Only needs to read the checked-out repo -- explicitly narrower than
+    # the workflow-level permissions (which include Pages/OIDC write, only
+    # actually needed by the deploy job).
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install asimov-simplepe
+        run: pip install -e .
+
+      - name: Lint tutorial CLI usage against the live asimov CLI
+        run: python scripts/lint_tutorial_commands.py
+
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    # Only build+deploy on an actual push to main, or a manual dispatch --
+    # a pull_request run has no publishing destination and (from a fork)
+    # no write access to Pages anyway; lint-tutorials above still runs on
+    # every PR. Without workflow_dispatch here too, the trigger declared
+    # above would accept a manual run but this job would silently skip it.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Just reads the checkout and writes a local artifact; the actual Pages
+    # write/OIDC token happens in the deploy job below.
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and docs dependencies
+        run: pip install -e ".[docs]"
+
+      - name: Build HTML documentation
+        run: python -m sphinx docs/ docs/_build/html -W
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,170 @@
+name: 'Setup asimov-simplepe Environment'
+description: 'Install asimov-simplepe (and its asimov + simple-pe dependencies) with conda'
+inputs:
+  python-version:
+    description: 'Python version to use'
+    default: '3.11'
+    required: false
+  conda-packages:
+    description: 'Path to conda packages file; set to empty string to skip heavy conda packages'
+    default: 'conda/packages.txt'
+    required: false
+  simple-pe-ref:
+    description: 'git.ligo.org simple-pe ref (branch/tag/commit) to install'
+    default: 'main'
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve simple-pe ref to a commit SHA
+      # The conda-env cache key below must be keyed on an immutable
+      # commit, not the (possibly moving) ref name itself: with only the
+      # ref name in the key, a cache created for `simple-pe-ref: main`
+      # stays a hit forever, even after upstream `main` advances -- so a
+      # later commit to simple-pe's `main` would silently be skipped
+      # entirely, and the e2e job would keep testing whatever revision
+      # happened to be current the first time this key was populated.
+      # `git ls-remote` resolves a branch/tag ref to its current commit
+      # (annotated tags resolve to the tag object, not the commit it
+      # points at, but that's still stable per tag content, which is all
+      # this key needs); an explicit commit SHA passed as `simple-pe-ref`
+      # doesn't match any ref and so falls back to using it verbatim.
+      id: resolve-simple-pe-ref
+      shell: bash
+      run: |
+        SHA=$(git ls-remote https://git.ligo.org/stephen-fairhurst/simple-pe.git "${{ inputs.simple-pe-ref }}" | cut -f1)
+        if [ -z "$SHA" ]; then
+          SHA="${{ inputs.simple-pe-ref }}"
+        fi
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Cache conda packages and pip
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/share/miniconda/pkgs
+          ~/.cache/pip
+        key: conda-${{ runner.os }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml') }}
+        restore-keys: |
+          conda-${{ runner.os }}-
+
+    - name: Set up conda environment
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniconda-version: "latest"
+        auto-activate-base: false
+        python-version: ${{ inputs.python-version }}
+        activate-environment: asimov
+        channels: conda-forge
+        use-mamba: true
+
+    - name: Cache asimov-simplepe conda env
+      id: cache-env
+      uses: actions/cache@v4
+      with:
+        path: /usr/share/miniconda/envs/asimov
+        # Includes this action's own file in the key: the pip constraints
+        # (setuptools<82) that make the cached env actually work live
+        # inside this file, not in conda/packages.txt/pyproject.toml --
+        # confirmed directly (while investigating an unrelated numpy pin
+        # that was tried and reverted, see CHANGELOG) that omitting it
+        # here would let a constraint change silently no-op on a cache hit
+        # restored from an already-cached env from an earlier run in this
+        # same PR that predates it.
+        key: conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-${{ steps.resolve-simple-pe-ref.outputs.sha }}-${{ hashFiles('conda/packages.txt', 'pyproject.toml', '.github/actions/setup-simplepe-env/action.yml') }}
+        restore-keys: |
+          conda-env-asimov-simplepe-${{ runner.os }}-py${{ inputs.python-version }}-
+
+    - name: Install conda dependencies (PyCBC, LALSuite)
+      # simple-pe itself has no conda-forge or PyPI package -- it's installed
+      # separately, straight from its GitLab repository, in the next step.
+      # PyCBC and LALSuite are its runtime dependencies.
+      if: steps.cache-env.outputs.cache-hit != 'true' && inputs.conda-packages != ''
+      shell: bash -el {0}
+      run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+        conda install -y -n asimov --file ${{ inputs.conda-packages }}
+
+    - name: Install simple-pe from GitLab
+      if: steps.cache-env.outputs.cache-hit != 'true'
+      shell: bash -el {0}
+      run: |
+        CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
+        CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
+        "$CONDA_PYTHON" -m ensurepip --upgrade
+        # simple_pe_pipe -> simple_pe.waveforms -> pycbc.waveform ->
+        # pycbc.waveform.plugin.retrieve_waveform_plugins() does a bare
+        # `import pkg_resources` (see simple-pe issue #29, "PyCBC version
+        # needs to be updated because pkg_resources is deprecated" -- still
+        # open upstream). setuptools removed the bundled `pkg_resources`
+        # module starting with 82.0.0 (confirmed directly: 81.0.0 still
+        # provides it, 82.0.0 raises `ModuleNotFoundError: No module named
+        # 'pkg_resources'`), so it must stay pinned below that boundary.
+        # A separate `pip install "setuptools<82"` command followed by a
+        # separate `pip install simple-pe` does NOT survive: confirmed
+        # directly that pip re-resolves setuptools back up to latest as a
+        # transitive dependency of the second install, silently undoing
+        # the pin from the first. A constraints file (applied to every pip
+        # invocation in this environment, including asimov-simplepe's own
+        # install below) is what actually holds the pin across installs.
+        #
+        # numpy<2 is a second, independent constraint. A `numpy<2` pin was
+        # tried once before and reverted (see CHANGELOG) because it only
+        # seemed to help the (INJ-mode-only) injection code path, where it
+        # unmasked a worse, unrelated bug specific to that path. Since
+        # then this plugin's e2e test moved to GWOSC mode, which never
+        # touches that path -- and a real e2e run against GWOSC mode
+        # confirmed the *real*, unavoidable trigger is
+        # `simple_pe_filter`'s own `load_trigger_parameters_from_file()`,
+        # used on every real analysis regardless of channel mode: it
+        # wraps the loaded trigger-parameters dict in `SimplePESamples` (a
+        # pesummary-style samples container -- built for posterior
+        # *chains*, so even a single scalar comes back as a shape-(1,)
+        # array rather than a true 0-d array) before
+        # `simple_pe.io.io.estimate_data_length_from_template_parameters`
+        # does `int(2**(np.ceil(np.log2(wf_len))))` on a value derived
+        # from it. NumPy hard-errors this exact implicit
+        # shape-(1,)-to-scalar conversion since 2.0 (a DeprecationWarning
+        # before that): `TypeError: only 0-dimensional arrays can be
+        # converted to Python scalars`, confirmed directly via this
+        # plugin's own e2e CI on the real `filter` DAG node. Pinning
+        # numpy<2 here keeps it a warning instead of a crash without
+        # touching simple-pe's own source.
+        echo "setuptools<82" > /tmp/simple-pe-constraints.txt
+        echo "numpy<2" >> /tmp/simple-pe-constraints.txt
+        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "setuptools<82" "numpy<2"
+        "$CONDA_PYTHON" -m pip install -c /tmp/simple-pe-constraints.txt "git+https://git.ligo.org/stephen-fairhurst/simple-pe.git@${{ inputs.simple-pe-ref }}"
+        echo "Installed setuptools at: $("$CONDA_PYTHON" -c 'import setuptools; print(setuptools.__version__)')"
+        echo "Installed numpy at: $("$CONDA_PYTHON" -c 'import numpy; print(numpy.__version__)')"
+        "$CONDA_PYTHON" -c 'import pkg_resources' && echo "pkg_resources importable: yes" || (echo "::error::pkg_resources is not importable after the setuptools<82 pin" && exit 1)
+        echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
+
+    - name: Install asimov-simplepe from source
+      shell: bash -e {0}
+      run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+        CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
+        CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
+        "$CONDA_PYTHON" -m ensurepip --upgrade
+        # Re-applies the same setuptools<82/numpy<2 constraints as the
+        # simple-pe install step above (see its comments) -- this install
+        # is unconditional (unlike that one, which is skipped on a
+        # conda-env cache hit), and without the constraints here too,
+        # installing this package's own dependencies could just as easily
+        # re-resolve either one past its boundary.
+        echo "setuptools<82" > /tmp/simple-pe-constraints.txt
+        echo "numpy<2" >> /tmp/simple-pe-constraints.txt
+        "$CONDA_PYTHON" -m pip install --force-reinstall -c /tmp/simple-pe-constraints.txt -e ".[test]"
+        # Regular (non-editable) installs set explicit, world-readable
+        # permissions from the wheel's RECORD; an editable install's
+        # metadata (entry_points.txt etc.) is instead written fresh by pip
+        # subject to the current process umask. This step runs as root, and
+        # under a restrictive root umask the resulting dist-info can end up
+        # unreadable by `submituser` -- which silently drops this package's
+        # `asimov.pipelines` entry point (asimov's own plugin loader catches
+        # and swallows the failure) rather than erroring here. Force
+        # everything world-readable so submituser can always see it.
+        chmod -R a+rX "$CONDA_BASE/envs/asimov"
+        echo "Installed asimov-simplepe from: $("$CONDA_PYTHON" -c 'import asimov_simplepe; print(asimov_simplepe.__file__)')"
+        echo "Installed asimov from: $("$CONDA_PYTHON" -c 'import asimov; print(asimov.__file__)')"
+        echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
