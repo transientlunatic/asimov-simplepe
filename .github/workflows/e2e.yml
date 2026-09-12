@@ -25,8 +25,19 @@ jobs:
     # publicly, so this job is deliberately bounded rather than left to a
     # default multi-hour ceiling if an assumption about its behaviour turns
     # out to be wrong (e.g. it hangs waiting on real GWOSC/datafind access
-    # instead of using the simulated ASD this test configures).
-    timeout-minutes: 30
+    # instead of using the simulated ASD this test configures). Bumped
+    # from 30 to 45 alongside the "Wait for the real reweighted posterior
+    # samples" step's own timeout below (900s -> 1500s): a real run with
+    # IMRPhenomXHM (see that step's comment) hit neither crash this test
+    # previously found (no OverflowError, no IndexError, no SIGKILL/OOM)
+    # but was still genuinely running -- not stuck -- when the old 900s
+    # budget ran out, confirmed directly via this plugin's own e2e CI
+    # (DAG status stayed DAG_STATUS_OK throughout, no failed/terminated
+    # analysis node in the dumped nodes.log). A real subdominant-mode
+    # reweighting analysis over real GW150914 data genuinely needs more
+    # than 15 wall-clock minutes to converge to 1000 effective samples,
+    # even with a cheaper, non-precessing approximant.
+    timeout-minutes: 45
     container:
       image: htcondor/mini:latest
       options: --privileged
@@ -317,14 +328,25 @@ jobs:
       # and simple_pe_analysis's own main() (confirmed directly from its
       # real source) hardcodes `file_format="dat"` with no .h5 branch --
       # requiring both would time out even on a genuine success.
+      #
+      # 1500s, not 900s (with the job's own timeout-minutes bumped to
+      # match, above): a real run against IMRPhenomXHM (see that
+      # fixture's own comment for why not IMRPhenomD/IMRPhenomXPHM) hit
+      # no crash at all -- no OverflowError, no IndexError, no SIGKILL --
+      # but was still genuinely running, not stuck, when the previous
+      # 900s budget ran out (DAG status stayed DAG_STATUS_OK throughout,
+      # confirmed directly via this plugin's own e2e CI). A real
+      # subdominant-mode reweighting analysis over real GW150914 data
+      # apparently needs more than 15 wall-clock minutes to converge to
+      # 1000 effective samples.
       - name: Wait for the real reweighted posterior samples (best-effort)
         continue-on-error: true
         uses: etive-io/actions/wait-for-files@v1
         with:
           patterns: "posterior_samples.dat"
           directory: "working/FAKE_SIMPLEPE_TEST_EVENT/simplepe-test/output"
-          timeout: "900"
-          interval: "15"
+          timeout: "1500"
+          interval: "20"
           working-directory: "e2e_project"
 
       # Unconditional (not just on failure): a real run got this far and
