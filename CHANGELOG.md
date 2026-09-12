@@ -8,6 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `resurrect()` now raises `PipelineException` instead of silently
+  returning `None` once it can no longer usefully resubmit the DAG.
+  Asimov's monitor loop (`RunningState._handle_no_condor_job` in asimov
+  core) treats a `resurrect()` call that returns normally as "handled,
+  keep waiting" -- so a production whose DAG had genuinely, permanently
+  failed (as opposed to merely being evicted) previously resubmitted its
+  rescue DAG up to five times and then silently did nothing at all: no
+  status change, no message, indistinguishable from a healthy job still
+  running indefinitely.
+  - Two cases now raise, both confirmed directly via this plugin's own
+    e2e CI investigation of a real reweighting failure: (1) the
+    production's collected logs (`collect_logs()`) match a known,
+    previously-confirmed upstream failure signature
+    (`_KNOWN_FAILURE_SIGNATURES`) -- currently the pesummary
+    `OverflowError: Range exceeds valid bounds` reweighting bug (see the
+    "e2e test: the completion criterion..." entry below) -- in which
+    case `resurrect()` raises *immediately*, without spending any of the
+    retry budget, naming the known cause directly in the exception
+    message; and (2) the retry budget (5 attempts) is exhausted without
+    a known signature being found, in which case it raises a generic
+    "exhausted N automatic rescue-DAG resubmission(s)" message. Case (1)
+    matters because blind resubmission of this specific bug is
+    guaranteed to fail identically every time, not just probably:
+    `simple_pe_analysis --seed` (confirmed directly from its real
+    source) defaults to a *fixed* value (`123456789`), not one derived
+    from OS entropy, so re-running the exact same rendered ini/trigger-
+    parameters reproduces the exact same "random" reweighting failure --
+    burning through five identical, doomed resubmissions before giving
+    up would waste real HTCondor compute time for zero chance of a
+    different outcome.
+  - The no-rescue-file case (the condor job disappeared without DAGMan
+    ever writing a rescue file at all -- a genuinely different and more
+    ambiguous situation, e.g. a transient job-tracking gap) is
+    deliberately left as a no-op, not a raise, to avoid false "stuck"
+    reports on jobs that are actually still fine.
 - Addressed a GitHub Copilot code review of the initial PR:
   - `_ensure_rundir()`'s fallback branch (no `production.rundir` set) now
     resolves to an absolute path via `os.path.abspath()`, matching the
