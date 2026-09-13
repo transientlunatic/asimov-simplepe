@@ -151,6 +151,23 @@ loop runs zero times and the DAG silently ends up containing only its
 `datafind` job, no error of any kind. Confirmed directly via this
 plugin's own e2e CI, which is why this template always sets it.
 
+### Effective sample target
+
+`neffective` (unset by default) caps the number of effective posterior
+samples `simple_pe_analysis` targets before it stops iterating, e.g.
+`production.meta['neffective']: 20`. Left unset, `simple_pe_analysis`
+uses its own default (1000 effective samples, confirmed directly from
+its real source) -- the right choice for real production use. This
+plugin's own e2e test sets it low (see `tests/test_blueprints/
+simplepe_production.yaml`): a real analysis against real GW150914 data,
+even with a higher-mode-capable, non-precessing approximant (see the
+"Known issue" note below), genuinely needs well over 25 wall-clock
+minutes on a single CPU to converge to the default 1000, confirmed
+directly via this plugin's own e2e CI -- more than is reasonable to
+demand from a smoke test of this plugin's own config rendering, DAG
+building, and submission (not a validation of simple-pe's actual
+scientific output).
+
 ### Data
 
 Strain data is read from a production's `data` metadata, using the same
@@ -246,30 +263,70 @@ that option is left at its default `False` (confirmed directly from its
 real `main()` source) -- duplicating the separate, `needs:`-linked
 PESummary production above, and running PESummary twice for no benefit.
 
-**Known issue:** `simple_pe_pipe`'s own `analysis` stage currently hits a
-genuine upstream numerical-robustness bug -- unrelated to the `INJ`-mode
-issue above, and hit on every real analysis regardless of channel mode --
-before it can produce a posterior samples file: PESummary's subdominant-
-multipole rejection-sampling reweighting
-(`pesummary.core.reweight.rejection_sampling()`, called unconditionally
-from `simple_pe.param_est.pe.reweight_based_on_observed_snrs()`) has no
-guard against a non-finite weight, and raises `OverflowError: Range
-exceeds valid bounds` when one occurs -- confirmed directly via this
-plugin's own e2e CI against real GW150914 GWOSC data (see `CHANGELOG.md`
-for the full trail). This is a *different* use of PESummary than the
+**Known issue (root-caused, not a permanent blocker):** `simple_pe_pipe`'s
+own `analysis` stage can hit a real crash before producing a posterior
+samples file: PESummary's subdominant-multipole rejection-sampling
+reweighting (`pesummary.core.reweight.rejection_sampling()`, called
+unconditionally from `simple_pe.param_est.pe.
+reweight_based_on_observed_snrs()`) has no guard against a non-finite
+weight, and raises `OverflowError: Range exceeds valid bounds` when one
+occurs. This is a *different* use of PESummary than the
 `disable_pesummary`/`PostProcessingNode` above: it happens inside
 `simple_pe_analysis` itself, as part of generating posterior samples from
 the Fisher-matrix point estimate, and isn't gated by `disable_pesummary`
-at all (confirmed directly: `simple_pe_analysis --help` doesn't even
-expose that flag). There is no CLI flag to disable or adjust this
-reweighting step, so it isn't something this plugin's ini/config
-rendering can work around. This plugin's own DAG building and submission
-are confirmed correct up to this point -- `datafind`, `filter`, and
-`analysis`'s own Fisher-matrix metric peak-finding and SNR computation
-all complete successfully, writing real `peak_parameters.json`/
-`peak_snrs.json` output -- so the e2e test verifies that real,
-currently-achievable output directly rather than requiring a full
-posterior-samples file.
+at all.
+
+This first looked like a genuine, unfixable upstream numerical-robustness
+bug -- but root-causing it directly via this plugin's own e2e CI (see
+`CHANGELOG.md` for the full trail) found the real trigger: the
+reweighting step unconditionally measures the *observed* SNR in the
+(3,3)/(4,4) higher multipoles and in precession, regardless of whether
+the configured `waveform.approximant` can represent them. Against a
+dominant-mode-only, non-precessing approximant (e.g. `IMRPhenomD`), those
+observed SNRs come back `NaN`, and the reference distribution built from
+them underflows to exactly `0.0` probability for essentially every
+sample once zeroed -- not a rare outlier, but systemic corruption. Using
+an approximant that actually supports higher modes (e.g. `IMRPhenomXHM`
+or `IMRPhenomXPHM` -- the latter is `simple_pe_filter`'s/
+`simple_pe_analysis`'s own `--approximant` default) avoids this
+entirely, confirmed directly: no `OverflowError` (or any other crash)
+recurs. `simple-pe`'s own real-waveform interpolation grids do make a
+precessing+higher-mode approximant meaningfully slower to converge than
+a dominant-mode-only one, though -- see the *Effective sample target*
+section above for how this plugin's own e2e test manages that.
+>
+> **Defensive safety net.** `simple-pe`'s
+> `reweight_based_on_observed_snrs()`/PESummary's `rejection_sampling()`
+> still have no guard against a non-finite weight even with a correct
+> approximant choice -- a real analysis could still hit a similarly
+> degenerate weight for other reasons this plugin hasn't characterised.
+> [`scripts/patch_simple_pe_reweight_guard.py`](scripts/patch_simple_pe_reweight_guard.py)
+> patches an installed `simple-pe`'s `reweight_based_on_observed_snrs()`
+> in place to zero out any non-finite weight before it reaches
+> `rejection_sampling()` -- treating a numerically broken sample as
+> zero-probability (rejected) rather than crashing, or (worse) treating
+> it as certain. The correct fix still belongs upstream (in either
+> `simple-pe` or `pesummary`, since any of `rejection_sampling()`'s other
+> callers could hit the same crash); this is deliberately just a
+> stopgap. Run it once, in the same Python environment
+> `simple_pe_analysis` runs in, right after installing `simple-pe` and
+> before running any real analysis:
+>
+> ```bash
+> python scripts/patch_simple_pe_reweight_guard.py
+> ```
+>
+> It's idempotent (a no-op if already applied) and fails loudly, rather
+> than silently doing nothing, if `simple-pe`'s source has changed enough
+> that its exact expected original text can't be found -- see the
+> script's own docstring for the full rationale. This can't be applied
+> automatically by `asimov_simplepe` itself at import time: the buggy code
+> runs inside `simple_pe_analysis`'s own HTCondor subprocess, a completely
+> separate Python process from asimov's, so a plugin-level monkeypatch
+> would never reach it -- it has to be applied to the installed
+> `simple-pe` package directly, in whatever environment actually runs the
+> analysis jobs. This plugin's own CI applies the exact same script (see
+> `.github/actions/setup-simplepe-env/action.yml`).
 
 ## Testing
 
@@ -284,8 +341,11 @@ pytest
 `simple_pe_pipe` DAG built and submitted through a real HTCondor scheduler
 against real GW150914 GWOSC data, waiting for and validating the real
 `peak_parameters.json`/`peak_snrs.json` output its `analysis` node
-produces. It does *not* currently wait for a full posterior-samples file --
-see the "Known issue" note under *Post-processing* above for why.
+produces. It also waits (best-effort; not yet a hard pass/fail
+requirement) for a real, final `posterior_samples.dat` -- see the
+"Known issue" note under *Post-processing* and the *Effective sample
+target* section above for the full trail on why a full analysis needs
+`neffective` capped for this to be feasible in CI at all.
 
 `.github/workflows/docs.yml` also checks that the subcommand and flags used
 by every `asimov ...` command shown in `docs/*.rst` still exist on the live,

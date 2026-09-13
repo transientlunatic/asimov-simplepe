@@ -681,25 +681,62 @@ class TestResurrect:
         mock_submit.assert_called_once()
         assert mock_production.meta["resurrections"] == 1
 
-    def test_resurrect_no_rescue_file_does_not_resubmit(
+    def test_resurrect_raises_after_five_attempts(
         self, mock_production, mock_config, temp_dir
     ):
-        mock_production.rundir = temp_dir
-        pipeline = SimplePE(mock_production)
-        with patch.object(pipeline, "submit_dag") as mock_submit:
-            pipeline.resurrect()
-
-        mock_submit.assert_not_called()
-
-    def test_resurrect_stops_after_five_attempts(
-        self, mock_production, mock_config, temp_dir
-    ):
+        """Once the retry budget is exhausted, resurrect() must raise so
+        the monitor loop marks the production 'stuck' instead of quietly
+        treating a no-op resurrect() as 'still handled, keep waiting' --
+        which previously left a permanently-failed production reporting
+        'running' forever with no diagnostic of any kind."""
         mock_production.rundir = temp_dir
         mock_production.meta["resurrections"] = 5
         submit_dir = os.path.join(temp_dir, "submit")
         os.makedirs(submit_dir)
         open(os.path.join(submit_dir, "simplepe.dag.rescue001"), "w").close()
 
+        pipeline = SimplePE(mock_production)
+        with patch.object(pipeline, "submit_dag") as mock_submit:
+            with pytest.raises(PipelineException, match="exhausted 5"):
+                pipeline.resurrect()
+
+        mock_submit.assert_not_called()
+
+    def test_resurrect_known_signature_raises_immediately(
+        self, mock_production, mock_config, temp_dir
+    ):
+        """A known-permanent, deterministic failure signature (here, the
+        confirmed upstream pesummary reweighting OverflowError) should
+        raise straight away, on the very first resurrect() call, naming
+        the known cause directly -- not after burning through five
+        identical, doomed resubmissions first (simple_pe_analysis's
+        --seed defaults to a fixed value, so re-running the same ini
+        reproduces the exact same failure every time)."""
+        mock_production.rundir = temp_dir
+        mock_production.meta.pop("resurrections", None)
+        submit_dir = os.path.join(temp_dir, "submit")
+        os.makedirs(submit_dir)
+        open(os.path.join(submit_dir, "simplepe.dag.rescue001"), "w").close()
+        error_dir = os.path.join(temp_dir, "error")
+        os.makedirs(error_dir)
+        with open(os.path.join(error_dir, "reweight.error"), "w") as error_file:
+            error_file.write(
+                "RuntimeWarning: divide by zero encountered in divide\n"
+                "OverflowError: Range exceeds valid bounds\n"
+            )
+
+        pipeline = SimplePE(mock_production)
+        with patch.object(pipeline, "submit_dag") as mock_submit:
+            with pytest.raises(PipelineException, match="PESummary"):
+                pipeline.resurrect()
+
+        mock_submit.assert_not_called()
+        assert "resurrections" not in mock_production.meta
+
+    def test_resurrect_no_rescue_file_does_not_raise(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = temp_dir
         pipeline = SimplePE(mock_production)
         with patch.object(pipeline, "submit_dag") as mock_submit:
             pipeline.resurrect()
@@ -789,6 +826,41 @@ class TestRealConfigRendering:
         # already assumes handles post-processing (see README's
         # Post-processing section). Regression test for this duplication.
         assert parser.get("pipeline", "disable_pesummary") == "True"
+        # neffective is left unset by default -- simple_pe_analysis's own
+        # default (1000 effective samples, confirmed directly from its
+        # real source) should apply for real production use unless a
+        # production explicitly opts into a lower target (e.g. this
+        # plugin's own e2e test; see CHANGELOG.md).
+        assert not parser.has_option("pipeline", "neffective")
+
+    def test_template_renders_custom_neffective(
+        self, mock_production, mock_config, temp_dir
+    ):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["neffective"] = 20
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert parser.get("pipeline", "neffective") == "20"
 
     def test_template_renders_custom_peak_finder(
         self, mock_production, mock_config, temp_dir

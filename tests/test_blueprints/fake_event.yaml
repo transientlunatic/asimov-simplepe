@@ -17,5 +17,37 @@ interferometers:
 - H1
 - L1
 event time: 1126259462.4
+# IMRPhenomXHM, not IMRPhenomD -- IMRPhenomD is dominant-mode-only and
+# non-precessing, but simple_pe_analysis's reweighting step
+# unconditionally measures the *observed* SNR in the (3,3)/(4,4) higher
+# multipoles and in precession regardless of whether the approximant can
+# represent them, so those observed SNRs came back NaN against
+# IMRPhenomD -- confirmed directly via this plugin's own e2e CI
+# (`peak_snrs.json` showed `"33": [nan], "44": [nan]`). Once
+# `np.nan_to_num` zeroed those NaNs, the reference (noncentral
+# chi-squared) distribution used to weight each sample became a
+# *central* one evaluated at the (artificially large, from this test's
+# synthetic near-design-sensitivity ASD combined with GW150914's real,
+# close distance) predicted higher-mode SNR -- which underflows to
+# exactly 0.0 probability in float64 for every sample, not just
+# outliers, corrupting the whole reweighting step (root-caused directly
+# via this plugin's own e2e CI; see CHANGELOG.md for the full trail).
+#
+# IMRPhenomXHM specifically, not IMRPhenomXPHM (simple_pe_filter's/
+# simple_pe_analysis's own --approximant default): XPHM does fix the
+# same NaN-SNR root cause (also confirmed directly), but its precessing
+# +HM interpolation grids (alpha_lm_grid/beta_22_grid/sigma_22_grid,
+# each built from real waveform generation across a 5-point grid per
+# direction) got the real `analysis` HTCondor job SIGKILL'd -- confirmed
+# directly via this plugin's own e2e CI (HTCondor's own accounting
+# showed the job allocated its full 8192 MB partitionable-slot request
+# before being killed), consistent with an out-of-memory kill in this
+# CI container. IMRPhenomXHM keeps the higher-multipole support that
+# fixes the NaN-SNR root cause while dropping precession (and its
+# beta_22_grid), meaningfully cheaper to evaluate -- confirmed
+# non-precessing via `simple_pe.waveforms.waveform.
+# precessing_approximant()`, which queries LALSimulation's own real
+# spin-support metadata for the approximant rather than guessing from
+# its name.
 waveform:
-  approximant: IMRPhenomD
+  approximant: IMRPhenomXHM

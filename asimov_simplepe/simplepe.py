@@ -514,6 +514,67 @@ class SimplePE(Pipeline):
         """
         super().after_completion()
 
+    # Known, previously-confirmed upstream failure signatures worth acting
+    # on immediately rather than burning the automatic-rescue retry
+    # budget on a doomed resubmission. Confirmed directly via this
+    # plugin's own e2e CI (see CHANGELOG.md's "Fixed" entry for the full
+    # trail): `pesummary.core.reweight.rejection_sampling()` has no guard
+    # against an `inf`/`nan` weight (a `RuntimeWarning: divide by zero
+    # encountered in divide` in pycbc's `Array` division immediately
+    # precedes it in the real traceback, consistent with a divide-by-zero
+    # somewhere in simple-pe's own subdominant-SNR calculation producing
+    # it) and does `np.random.uniform(0, np.max(weights), ...)`, which
+    # raises `OverflowError: Range exceeds valid bounds` once that
+    # inf/nan weight reaches `np.max()`. It's called unconditionally from
+    # `simple_pe.param_est.pe.reweight_based_on_observed_snrs()`, with no
+    # `simple_pe_analysis`/`simple_pe_pipe` CLI flag to disable or adjust
+    # it. Crucially, `simple_pe_analysis --seed` (confirmed directly from
+    # its real source, `simple_pe/cli/simple_pe_analysis.py`) defaults to
+    # a *fixed* value (``123456789``), not one derived from OS entropy --
+    # so a resubmission of the exact same rendered ini/trigger-parameters
+    # draws the exact same "random" samples and fails identically every
+    # time. Blindly resubmitting this DAG up to five times before giving
+    # up (the pre-existing retry budget below, meant for genuinely
+    # transient HTCondor evictions) would therefore just repeat a fully
+    # deterministic failure five times over, for no benefit.
+    _KNOWN_FAILURE_SIGNATURES = (
+        (
+            "OverflowError: Range exceeds valid bounds",
+            "This matches a known upstream numerical-robustness bug in "
+            "PESummary's subdominant-multipole reweighting step "
+            "(pesummary.core.reweight.rejection_sampling(), called from "
+            "simple_pe.param_est.pe.reweight_based_on_observed_snrs()): "
+            "an inf/nan weight reaches np.random.uniform(0, np.max(weights)), "
+            "which raises OverflowError. There is no CLI flag to disable "
+            "or adjust this reweighting step, so this production's DAG "
+            "will keep failing identically on every retry until it is "
+            "fixed upstream in PESummary or simple-pe.",
+        ),
+    )
+
+    def _diagnose_failure(self):
+        """
+        Look for a known, previously-confirmed upstream failure signature
+        in this production's collected logs, to turn an otherwise opaque
+        "stuck after N automatic rescue attempts" message into something
+        actionable.
+
+        Returns
+        -------
+        str or None
+            A human-readable diagnosis if a known signature is found in
+            any collected log, else ``None``.
+        """
+        try:
+            logs = self.collect_logs()
+        except OSError:
+            return None
+        for contents in logs.values():
+            for signature, diagnosis in self._KNOWN_FAILURE_SIGNATURES:
+                if signature in contents:
+                    return diagnosis
+        return None
+
     def resurrect(self):
         """
         Attempt to resurrect a failed or evicted job by resubmitting its
@@ -522,15 +583,52 @@ class SimplePE(Pipeline):
         Like ``lalinference_pipe``, ``simple_pe_pipe`` builds a real
         HTCondor DAG, so an interrupted run leaves a DAGMan rescue file
         (``*.rescue*``) behind; resubmitting picks it up automatically.
+
+        Raises
+        ------
+        PipelineException
+           Raised immediately (without spending any of the retry budget)
+           if a known-permanent, deterministic failure signature (see
+           ``_KNOWN_FAILURE_SIGNATURES`` above) is found in this
+           production's logs, and otherwise once the automatic-rescue
+           retry budget (5 attempts) is exhausted -- in both cases so the
+           production is surfaced as ``stuck`` with a diagnostic message
+           instead of silently staying "running" forever. Asimov's
+           monitor loop (``RunningState._handle_no_condor_job``) treats a
+           ``resurrect()`` call that returns normally as "handled, keep
+           waiting" -- so without this, a production whose DAG has
+           genuinely, permanently failed (as opposed to merely being
+           evicted) would resubmit its rescue DAG (up to) five times and
+           then silently stop doing anything at all, with no status
+           change and no message, indistinguishable from a healthy job
+           still running.
         """
+        rescue_files = glob.glob(
+            os.path.join(self.production.rundir, "**", "*.rescue*"), recursive=True
+        )
+        if not rescue_files:
+            return
+
+        diagnosis = self._diagnose_failure()
+        if diagnosis:
+            message = f"{self.production.name}: {diagnosis}"
+            self.logger.error(message)
+            raise PipelineException(message, production=self.production.name)
+
         try:
             count = self.production.meta["resurrections"]
         except KeyError:
             count = 0
-        rescue_files = glob.glob(
-            os.path.join(self.production.rundir, "**", "*.rescue*"), recursive=True
-        )
-        if count < 5 and rescue_files:
+        if count < 5:
             count += 1
             self.production.meta["resurrections"] = count
             self.submit_dag()
+            return
+
+        message = (
+            f"{self.production.name}: exhausted {count} automatic "
+            "rescue-DAG resubmission(s); the DAG keeps failing rather "
+            "than completing."
+        )
+        self.logger.error(message)
+        raise PipelineException(message, production=self.production.name)

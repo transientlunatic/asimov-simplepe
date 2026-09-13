@@ -8,6 +8,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `tests/test_blueprints/fake_event.yaml`'s `waveform.approximant` is now
+  `IMRPhenomXHM`, not `IMRPhenomD` -- the actual root cause of the e2e
+  test's reweighting crash, confirmed directly via this plugin's own
+  e2e CI (not a genuine, unfixable upstream numerical-robustness bug as
+  first assumed; see the entries below documenting that investigation).
+  `IMRPhenomD` is a dominant-mode-only, non-precessing waveform model,
+  but `simple_pe_analysis`'s reweighting step unconditionally measures
+  the *observed* SNR in the (3,3)/(4,4) higher multipoles and in
+  precession regardless of whether the approximant can represent them
+  at all. Against `IMRPhenomD`, those observed SNRs came back `NaN`
+  (confirmed directly: a real run's `peak_snrs.json` contained
+  `"33": [nan], "44": [nan]`). Once `np.nan_to_num` zeroed those NaNs
+  (per `scripts/patch_simple_pe_reweight_guard.py`, below), the
+  reference (noncentral chi-squared) distribution used to weight each
+  sample became a *central* one evaluated at the predicted higher-mode
+  SNR for that sample -- which, given this test's inflated dominant-mode
+  SNR (~113, from a synthetic near-design-sensitivity ASD combined with
+  GW150914's real, close distance -- real GW150914's SNR is ~24),
+  underflows to exactly `0.0` probability in float64 for essentially
+  every sample, not just outliers, corrupting the whole reweighting
+  step regardless of any inf/nan-weight guard.
+  - First tried `IMRPhenomXPHM` (`simple_pe_filter`'s/
+    `simple_pe_analysis`'s own `--approximant` default, confirmed
+    directly from their real source): this did fix the same NaN-SNR
+    root cause (also confirmed directly -- no more `NaN` higher-mode
+    SNRs, and neither of the previously-seen crashes recurred), but its
+    precessing+HM interpolation grids (`alpha_lm_grid`/`beta_22_grid`/
+    `sigma_22_grid`, each built from real waveform generation across a
+    5-point grid per direction) got the real `analysis` HTCondor job
+    `SIGKILL`'d -- confirmed directly: HTCondor's own accounting showed
+    the job allocated its full 8192 MB partitionable-slot request
+    before being killed, consistent with an out-of-memory kill in this
+    CI container.
+  - `IMRPhenomXHM` keeps the higher-multipole support that fixes the
+    NaN-SNR root cause while dropping precession (and its
+    `beta_22_grid`), meaningfully cheaper to evaluate -- confirmed
+    non-precessing via `simple_pe.waveforms.waveform.
+    precessing_approximant()`, which queries LALSimulation's own real
+    spin-support metadata for the approximant rather than guessing from
+    its name.
+  - Even with `IMRPhenomXHM`, a real run hit no crash at all (no
+    `OverflowError`, `IndexError`, or `SIGKILL`) but was still genuinely
+    running -- not stuck -- when a 900s wait for `posterior_samples.dat`
+    ran out (`DAG status` stayed `DAG_STATUS_OK` throughout). Bumped that
+    wait to 1500s and `e2e.yml`'s own `timeout-minutes` from 30 to 45 to
+    match; even that ran out with the analysis still healthily
+    converging, no crash. A real subdominant-mode reweighting analysis
+    over real GW150914 data, on a single CPU (`ncpus: 1`), apparently
+    needs well over 25 wall-clock minutes to converge to the
+    default 1000 effective samples -- addressed by capping
+    `neffective` down for this test specifically (see `Added`, below)
+    rather than continuing to guess at an unbounded timeout ceiling.
+- `resurrect()` now raises `PipelineException` instead of silently
+  returning `None` once it can no longer usefully resubmit the DAG.
+  Asimov's monitor loop (`RunningState._handle_no_condor_job` in asimov
+  core) treats a `resurrect()` call that returns normally as "handled,
+  keep waiting" -- so a production whose DAG had genuinely, permanently
+  failed (as opposed to merely being evicted) previously resubmitted its
+  rescue DAG up to five times and then silently did nothing at all: no
+  status change, no message, indistinguishable from a healthy job still
+  running indefinitely.
+  - Two cases now raise, both confirmed directly via this plugin's own
+    e2e CI investigation of a real reweighting failure: (1) the
+    production's collected logs (`collect_logs()`) match a known,
+    previously-confirmed upstream failure signature
+    (`_KNOWN_FAILURE_SIGNATURES`) -- currently the pesummary
+    `OverflowError: Range exceeds valid bounds` reweighting bug (see the
+    "e2e test: the completion criterion..." entry below) -- in which
+    case `resurrect()` raises *immediately*, without spending any of the
+    retry budget, naming the known cause directly in the exception
+    message; and (2) the retry budget (5 attempts) is exhausted without
+    a known signature being found, in which case it raises a generic
+    "exhausted N automatic rescue-DAG resubmission(s)" message. Case (1)
+    matters because blind resubmission of this specific bug is
+    guaranteed to fail identically every time, not just probably:
+    `simple_pe_analysis --seed` (confirmed directly from its real
+    source) defaults to a *fixed* value (`123456789`), not one derived
+    from OS entropy, so re-running the exact same rendered ini/trigger-
+    parameters reproduces the exact same "random" reweighting failure --
+    burning through five identical, doomed resubmissions before giving
+    up would waste real HTCondor compute time for zero chance of a
+    different outcome.
+  - The no-rescue-file case (the condor job disappeared without DAGMan
+    ever writing a rescue file at all -- a genuinely different and more
+    ambiguous situation, e.g. a transient job-tracking gap) is
+    deliberately left as a no-op, not a raise, to avoid false "stuck"
+    reports on jobs that are actually still fine.
 - `configs/simplepe.ini` now sets `disable_pesummary = True`. Left at its
   default `False`, `simple_pe_pipe`'s own `main()` bakes a full PESummary
   post-processing job into its DAG as a child of the analysis node
@@ -307,6 +394,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own printed argument `Namespace` in CI.
 
 ### Added
+- `config_template` now renders `neffective` when a production sets
+  `production.meta['neffective']` (e.g. `20`), omitted entirely
+  otherwise so real production use keeps `simple_pe_analysis`'s own
+  default (1000 effective samples, confirmed directly from its real
+  source) -- confirmed via `_format_arg_lists()` in `simple_pe_pipe.py`
+  that an unset value is dropped from the real command line rather than
+  rendered as a literal `None`. This plugin's own e2e test now sets it
+  to `20` (`tests/test_blueprints/simplepe_production.yaml`): confirmed
+  directly via this plugin's own e2e CI that even the cheaper,
+  higher-mode-only `IMRPhenomXHM` approximant needs well over 25
+  wall-clock minutes on a single CPU to converge to the default 1000 --
+  more than is reasonable to demand of a smoke test of this plugin's own
+  config rendering, DAG building, and submission (not a validation of
+  simple-pe's actual scientific output).
+- `scripts/patch_simple_pe_reweight_guard.py`, a short-term stopgap for
+  the confirmed upstream `pesummary` reweighting `OverflowError`
+  documented under "Fixed" above (see the "e2e test: the completion
+  criterion..." entry). Reading `simple_pe_analysis`'s complete, real
+  argument list and `main()` (`simple_pe/cli/simple_pe_analysis.py`)
+  confirmed there is genuinely no CLI/ini-level way to disable or route
+  around its unconditional reweighting call -- so the only way to
+  actually unblock full posterior-sample generation in the short term,
+  rather than just fail cleanly (which is all the `resurrect()` fix
+  above does), is to patch the bug itself. The script patches an
+  installed `simple-pe`'s `reweight_based_on_observed_snrs()`
+  (`simple_pe/param_est/pe.py`) in place, zeroing out any non-finite
+  weight (`np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)`) before
+  it reaches `pesummary.core.reweight.rejection_sampling()` -- treating a
+  numerically broken sample (one whose subdominant-SNR calculation hit
+  the underlying divide-by-zero) as zero-probability (rejected) rather
+  than crashing the whole run, or -- worse -- as *certain* (an
+  unguarded `inf` weight always wins rejection sampling against every
+  finite-weight sample, which would silently produce a degenerate,
+  scientifically meaningless posterior even if it didn't crash first).
+  Verified directly: reproduces the real `OverflowError` unpatched and
+  confirms the guarded weights never select the broken (inf/nan) samples,
+  against the exact `rejection_sampling()` logic from a real, freshly
+  downloaded `pesummary` 1.7.0. The patch itself is idempotent (a no-op
+  if already applied) and, deliberately, is not a blind `sed`: it matches
+  the exact expected original source text and exits non-zero (rather
+  than silently no-opping) if that text isn't found, so a future upstream
+  change to this function surfaces as a clear CI failure instead of
+  quietly leaving the crash unpatched. It also takes care to preserve the
+  installed file's real CRLF line endings (confirmed directly: Python's
+  default text-mode I/O would otherwise silently rewrite the *entire*
+  file to LF on save, turning a small, precise one-function patch into a
+  spurious file-wide diff). This can't be a plugin-level Python
+  monkeypatch inside `asimov_simplepe` itself: the buggy code runs inside
+  `simple_pe_analysis`'s own HTCondor subprocess, a completely separate
+  Python process from asimov's, so patching the installed package is the
+  only mechanism that actually reaches it. `.github/actions/
+  setup-simplepe-env/action.yml` now applies this same script during
+  environment setup (once per freshly-populated conda-env cache, matching
+  the existing `setuptools`/`numpy` pin steps' pattern), and `e2e.yml`
+  gained a new, deliberately non-blocking diagnostic step that reports
+  whether this actually unblocks a real posterior-samples file against
+  real GWOSC data, ahead of promoting that to a hard pass/fail
+  requirement (and updating this plugin's own completion-criterion
+  claims to match) in a follow-up change once confirmed by a real run.
+  This is a stopgap, not a substitute for a real fix landing upstream in
+  either `simple-pe` or `pesummary` -- see README.md's "Short-term
+  workaround" note for user-facing instructions to apply the same patch
+  to a real deployment environment.
 - Initial release of the `asimov-simplepe` plugin, integrating
   [simple-pe](https://git.ligo.org/stephen-fairhurst/simple-pe) (a rapid,
   metric/Fisher-matrix-based parameter estimation code) with

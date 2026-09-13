@@ -139,6 +139,33 @@ runs:
         "$CONDA_PYTHON" -c 'import pkg_resources' && echo "pkg_resources importable: yes" || (echo "::error::pkg_resources is not importable after the setuptools<82 pin" && exit 1)
         echo "Installed simple_pe_pipe at: $("$CONDA_PYTHON" -c 'import shutil; print(shutil.which("simple_pe_pipe"))')"
 
+    - name: Patch simple-pe's reweighting against a confirmed inf/nan-weight crash
+      # A genuine upstream numerical-robustness bug (see README.md's
+      # "Known issue"/CHANGELOG.md): `simple_pe.param_est.pe.
+      # reweight_based_on_observed_snrs()` passes samples['weight']
+      # straight into `pesummary.core.reweight.rejection_sampling()`,
+      # which has no guard against a non-finite weight (produced by a
+      # divide-by-zero in simple-pe's own subdominant-SNR calculation for
+      # a handful of samples) and crashes with `OverflowError: Range
+      # exceeds valid bounds`. There's no CLI/ini flag to disable or
+      # adjust this reweighting step, so it can't be worked around from
+      # this plugin's config alone -- confirmed directly by reading
+      # simple_pe_analysis's real, complete argument list and main().
+      # This is a short-term stopgap, not a substitute for a real
+      # upstream fix: see scripts/patch_simple_pe_reweight_guard.py's own
+      # docstring for the full rationale and why this can't just be a
+      # plugin-level Python monkeypatch (the buggy code runs inside
+      # simple_pe_analysis's own HTCondor subprocess, not asimov's).
+      # Skipped on a conda-env cache hit: the cached env directory
+      # already carries the patched file from whichever earlier run first
+      # populated that cache.
+      if: steps.cache-env.outputs.cache-hit != 'true'
+      shell: bash -el {0}
+      run: |
+        CONDA_BASE="$("${CONDA_EXE:-conda}" info --base)"
+        CONDA_PYTHON="${CONDA_BASE}/envs/asimov/bin/python"
+        "$CONDA_PYTHON" "${GITHUB_WORKSPACE}/scripts/patch_simple_pe_reweight_guard.py"
+
     - name: Install asimov-simplepe from source
       shell: bash -e {0}
       run: |
