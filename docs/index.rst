@@ -252,11 +252,24 @@ Data
 
 Strain data is read from a production's ``data`` meta-data. ``data.channels``
 is the channel name *without* the leading ``IFO:`` (this plugin adds that
-itself when rendering the ini); ``data.asd`` is a path to a real, two-column
-(frequency, ASD) text file -- confirmed directly from ``--help`` ("ASD files
-to use for the analysis") and from this plugin's own e2e CI: there is no
-analytic-PSD-model-name shortcut in the CLI, it always opens whatever string
-is given as a literal file path.
+itself when rendering the ini); ``data.asd`` and/or ``data.psd`` is a path to
+a real, two-column (frequency, ASD or PSD respectively) text file --
+confirmed directly from ``--help`` ("ASD files to use for the analysis")
+and from this plugin's own e2e CI: there is no analytic-PSD-model-name
+shortcut in the CLI, it always opens whatever string is given as a literal
+file path.
+
+``simple_pe_pipe`` accepts either ``--asd`` or ``--psd`` (confirmed
+directly from its own ``--help``/parsed-Namespace output: both are
+dict-typed, ``{}``-default options using the same ``IFO:path`` token
+format), so a project seeded with pre-computed PSDs (e.g. from an
+upstream PSD-estimation step) can set ``data.psd`` instead of
+``data.asd`` -- only whichever key is actually present on the production
+is rendered into the ini. Setting ``data.asd`` when the production only
+has a ``data.psd`` key (or vice versa) previously raised a Jinja2
+``UndefinedError`` (``'dict object' has no attribute 'asd'``), confirmed
+directly from a real user report; this is why both are now conditionally
+rendered rather than one being assumed to always exist.
 
 .. code-block:: yaml
 
@@ -267,6 +280,15 @@ is given as a literal file path.
      asd:
        H1: /path/to/H1_asd.txt
        L1: /path/to/L1_asd.txt
+
+   # or, for a project seeded with pre-computed PSDs instead:
+   data:
+     channels:
+       H1: DCS-CALIB_STRAIN_CLEAN_C01
+       L1: DCS-CALIB_STRAIN_CLEAN_C01
+     psd:
+       H1: /path/to/H1_psd.txt
+       L1: /path/to/L1_psd.txt
 
 ``simple_pe_pipe`` also recognises two special ``data.channels`` values,
 confirmed directly from its own ``--help`` text: ``GWOSC``, to read public

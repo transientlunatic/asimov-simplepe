@@ -862,6 +862,55 @@ class TestRealConfigRendering:
         parser = Pipeline.read_ini(cfg_path)
         assert parser.get("pipeline", "neffective") == "20"
 
+    def test_template_renders_psd_instead_of_asd(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # A project seeded with pre-computed PSDs (rather than ASDs) sets
+        # data.psd, not data.asd -- confirmed directly from a real user
+        # report that rendering `data['asd'][ifo]` unconditionally raised
+        # a Jinja2 UndefinedError ("'dict object' has no attribute 'asd'")
+        # for exactly this case, since data.asd didn't exist at all.
+        # simple_pe_pipe accepts --psd as a same-shaped alternative to
+        # --asd (confirmed directly from its real --help/Namespace).
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {
+                "H1": "H1:GDS-CALIB_STRAIN",
+                "L1": "L1:GDS-CALIB_STRAIN",
+            },
+            "psd": {
+                "H1": "/data/H1_psd.txt",
+                "L1": "/data/L1_psd.txt",
+            },
+        }
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert (
+            parser.get("pipeline", "psd")
+            == "{H1:/data/H1_psd.txt,L1:/data/L1_psd.txt}"
+        )
+        assert not parser.has_option("pipeline", "asd")
+
     def test_template_renders_custom_peak_finder(
         self, mock_production, mock_config, temp_dir
     ):

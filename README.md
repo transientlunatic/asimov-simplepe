@@ -195,19 +195,28 @@ conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
   for the full trail); this plugin's own code fully supports `INJ`
   (unit-tested) and will use it correctly once fixed upstream, but the
   e2e test itself uses `GWOSC` instead to avoid depending on that fix.
-- `data.asd` -- per-interferometer path to a real, two-column (frequency,
-  ASD) text file. There is no analytic-PSD-model-name shortcut here --
-  confirmed directly from `--help` ("ASD files to use for the analysis")
-  and from this plugin's own e2e CI, which generates a real file from
-  pycbc's analytic `aLIGOZeroDetHighPower` model for its test (a PSD is
-  needed for the Fisher-matrix/SNR calculation regardless of where the
-  strain data itself comes from).
+- `data.asd` and/or `data.psd` -- per-interferometer path to a real,
+  two-column (frequency, ASD or PSD respectively) text file. `simple_pe_pipe`
+  accepts either (confirmed directly from its own `--help`/parsed-Namespace
+  output: `--asd`/`--psd` are both dict-typed, `{}`-default options using
+  the same `IFO:path` token format as `--channels`), so a project seeded
+  with pre-computed PSDs (e.g. from an upstream PSD-estimation step) can
+  set `data.psd` instead of `data.asd` -- only whichever is actually
+  present on the production is rendered into the ini; supplying neither
+  omits both keys, which `simple_pe_pipe` will itself reject. There is no
+  analytic-PSD-model-name shortcut for either -- confirmed directly from
+  `--help` ("ASD files to use for the analysis") and from this plugin's
+  own e2e CI, which generates a real file from pycbc's analytic
+  `aLIGOZeroDetHighPower` model for its test (a PSD is needed for the
+  Fisher-matrix/SNR calculation regardless of where the strain data
+  itself comes from).
 
 This means a production populated by a data-retrieval step (for example
 [asimov-gwdata](https://github.com/etive-io/asimov-gwdata)) can be picked
 up by making the `simplepe` production `needs:` that data-retrieval
-production and mapping its output into `data.channels`/`data.asd` (stripping
-the data-retrieval step's own `IFO:` channel prefix, if it includes one).
+production and mapping its output into `data.channels`/`data.asd`
+(or `data.psd`, whichever the upstream step provides) -- stripping
+the data-retrieval step's own `IFO:` channel prefix, if it includes one.
 
 ### Trigger parameters
 
