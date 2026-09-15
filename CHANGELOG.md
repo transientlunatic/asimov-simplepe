@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `configs/simplepe.ini` now renders `asd`/`psd` conditionally, only when
+  the production's `data` metadata actually provides the corresponding
+  key, instead of unconditionally rendering `asd = ...` from
+  `data['asd'][ifo]`. A project seeded with pre-computed PSDs (rather
+  than ASDs) sets `data.psd`, not `data.asd`, and rendering the latter
+  unconditionally crashed with a Jinja2 `UndefinedError` (`'dict object'
+  has no attribute 'asd'`) at `asimov manage build` -- confirmed directly
+  from a real user report. `simple_pe_pipe` accepts either `--asd` or
+  `--psd` (confirmed directly from its own `--help`/parsed-Namespace
+  output: both are dict-typed, `{}`-default options using the same
+  `IFO:path` token format), so `data.psd` is now a first-class
+  alternative to `data.asd`, not just an unsupported input that crashed
+  the template.
 - `tests/test_blueprints/fake_event.yaml`'s `waveform.approximant` is now
   `IMRPhenomXHM`, not `IMRPhenomD` -- the actual root cause of the e2e
   test's reweighting crash, confirmed directly via this plugin's own
