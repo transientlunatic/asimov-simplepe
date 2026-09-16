@@ -23,6 +23,18 @@ def mock_production():
     production.event.repository.directory = "/tmp/test_repo"
     production.event.repository.find_prods.return_value = ["TestProduction.ini"]
 
+    # A plain MagicMock() auto-creates a truthy child mock for any
+    # attribute access, so `production.psds` must be set explicitly here
+    # -- otherwise `{% if production.psds %}` in configs/simplepe.ini
+    # would see a Mock object (always truthy) instead of a real,
+    # genuinely-empty dict, silently breaking any test that doesn't
+    # itself set `production.psds`. `psds` is a real attribute on every
+    # asimov `Production` (aliased from `GravitationalWaveTransient`),
+    # populated by `_collect_psds()` from a top-level `psds:` ledger key
+    # or a needs:-linked dependency's assets -- confirmed directly from
+    # asimov core's real source, via a real user's project ledger.
+    production.psds = {}
+
     production.meta = {
         "event time": 1126259462.4,
         "interferometers": ["H1", "L1"],

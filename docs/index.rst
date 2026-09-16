@@ -252,24 +252,16 @@ Data
 
 Strain data is read from a production's ``data`` meta-data. ``data.channels``
 is the channel name *without* the leading ``IFO:`` (this plugin adds that
-itself when rendering the ini); ``data.asd`` and/or ``data.psd`` is a path to
-a real, two-column (frequency, ASD or PSD respectively) text file --
-confirmed directly from ``--help`` ("ASD files to use for the analysis")
-and from this plugin's own e2e CI: there is no analytic-PSD-model-name
-shortcut in the CLI, it always opens whatever string is given as a literal
-file path.
-
-``simple_pe_pipe`` accepts either ``--asd`` or ``--psd`` (confirmed
-directly from its own ``--help``/parsed-Namespace output: both are
-dict-typed, ``{}``-default options using the same ``IFO:path`` token
-format), so a project seeded with pre-computed PSDs (e.g. from an
-upstream PSD-estimation step) can set ``data.psd`` instead of
-``data.asd`` -- only whichever key is actually present on the production
-is rendered into the ini. Setting ``data.asd`` when the production only
-has a ``data.psd`` key (or vice versa) previously raised a Jinja2
+itself when rendering the ini); ``data.asd`` is a path to a real, two-column
+(frequency, ASD) text file -- confirmed directly from ``--help`` ("ASD files
+to use for the analysis") and from this plugin's own e2e CI: there is no
+analytic-PSD-model-name shortcut in the CLI, it always opens whatever string
+is given as a literal file path. There is no Asimov-core-level mechanism for
+ASDs, so ``data.asd`` is the only way to supply one; setting it when the
+production has no ``data.asd`` key at all previously raised a Jinja2
 ``UndefinedError`` (``'dict object' has no attribute 'asd'``), confirmed
-directly from a real user report; this is why both are now conditionally
-rendered rather than one being assumed to always exist.
+directly from a real user report -- it's now conditionally rendered instead
+of being assumed to always exist.
 
 .. code-block:: yaml
 
@@ -281,7 +273,35 @@ rendered rather than one being assumed to always exist.
        H1: /path/to/H1_asd.txt
        L1: /path/to/L1_asd.txt
 
-   # or, for a project seeded with pre-computed PSDs instead:
+``simple_pe_pipe`` also accepts ``--psd`` as a same-shaped alternative to
+``--asd`` (confirmed directly from its own ``--help``/parsed-Namespace
+output: both are dict-typed, ``{}``-default options using the same
+``IFO:path`` token format). PSDs specifically have a first-class, built-in
+Asimov mechanism that this plugin prefers: ``production.psds`` (confirmed
+directly from asimov core's real source,
+``asimov.analysis.GravitationalWaveTransient._collect_psds()``, aliased as
+``asimov.event.Production``), populated automatically from a **top-level**
+``psds:`` key on the production's ledger entry -- *not* nested under
+``data:`` -- or, failing that, pulled from a ``needs:``-linked upstream
+production's ``collect_assets()["psds"]``. This is the real, established
+Asimov convention for pre-computed PSDs, confirmed directly from a real
+user's project ledger:
+
+.. code-block:: yaml
+
+   kind: analysis
+   name: simplepe-test
+   pipeline: simplepe
+   psds:
+     H1: /path/to/H1_psd.dat
+     L1: /path/to/L1_psd.dat
+
+A secondary, plugin-local ``data.psd`` key is also supported, used only
+when ``production.psds`` is empty, for setting a PSD directly alongside
+``data.channels``/``data.asd`` instead:
+
+.. code-block:: yaml
+
    data:
      channels:
        H1: DCS-CALIB_STRAIN_CLEAN_C01
