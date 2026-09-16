@@ -911,6 +911,103 @@ class TestRealConfigRendering:
         )
         assert not parser.has_option("pipeline", "asd")
 
+    def test_template_renders_psd_from_production_psds(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # The real, established Asimov convention for pre-computed PSDs:
+        # a top-level `psds:` key on the production's ledger entry (NOT
+        # nested under `data:`), which asimov core resolves automatically
+        # into `production.psds` (`GravitationalWaveTransient.
+        # _collect_psds()`, confirmed directly from its real source) --
+        # including pulling from a needs:-linked upstream production's
+        # assets if `psds:` isn't set directly. Confirmed directly from a
+        # real user's project ledger that this, not `data.psd`, is what
+        # real projects actually use.
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.psds = {
+            "H1": "/data/psds/H1_psd.dat",
+            "L1": "/data/psds/L1_psd.dat",
+            # A production.psds dict may legitimately cover more IFOs
+            # than this analysis actually uses (e.g. a project-wide
+            # psds: block shared across many productions) -- only the
+            # ones in this production's own interferometers list should
+            # be rendered.
+            "V1": "/data/psds/V1_psd.dat",
+        }
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert (
+            parser.get("pipeline", "psd")
+            == "{H1:/data/psds/H1_psd.dat,L1:/data/psds/L1_psd.dat}"
+        )
+
+    def test_production_psds_takes_priority_over_data_psd(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # If both are somehow set, the real, asimov-core-resolved
+        # production.psds should win over the plugin-local data.psd
+        # override, not the other way round.
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.psds = {
+            "H1": "/from-production-psds/H1_psd.dat",
+            "L1": "/from-production-psds/L1_psd.dat",
+        }
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {
+                "H1": "H1:GDS-CALIB_STRAIN",
+                "L1": "L1:GDS-CALIB_STRAIN",
+            },
+            "psd": {
+                "H1": "/from-data-psd/H1_psd.dat",
+                "L1": "/from-data-psd/L1_psd.dat",
+            },
+        }
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert (
+            parser.get("pipeline", "psd")
+            == "{H1:/from-production-psds/H1_psd.dat,L1:/from-production-psds/L1_psd.dat}"
+        )
+
     def test_template_renders_custom_peak_finder(
         self, mock_production, mock_config, temp_dir
     ):

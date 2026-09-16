@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `configs/simplepe.ini` now renders `psd` from `production.psds` as the
+  primary source, not just `data.psd`. `production.psds` is a real,
+  built-in Asimov mechanism (confirmed directly from asimov core's real
+  source, `asimov.analysis.GravitationalWaveTransient._collect_psds()`,
+  aliased as `asimov.event.Production`): it's populated automatically
+  from a *top-level* `psds:` key on the production's ledger entry (not
+  nested under `data:`), or, failing that, pulled from a `needs:`-linked
+  upstream production's `collect_assets()["psds"]`. This is the real,
+  established Asimov convention for pre-computed PSDs -- confirmed
+  directly from a real user's project ledger, whose `psds:` block
+  wasn't being picked up at all by the previous `data.psd`-only fix,
+  since that key genuinely isn't where real projects put it. `data.psd`
+  remains supported as a secondary, plugin-local override, used only
+  when `production.psds` is empty. There's no equivalent core mechanism
+  for ASDs, so `data.asd` is unchanged.
 - `configs/simplepe.ini` now renders `asd`/`psd` conditionally, only when
   the production's `data` metadata actually provides the corresponding
   key, instead of unconditionally rendering `asd = ...` from
