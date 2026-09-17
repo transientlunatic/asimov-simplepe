@@ -132,6 +132,18 @@ class SimplePE(Pipeline):
         ``simple_pe_datafind`` to simulate an injection (the ``INJ`` magic
         value), matching its own ``"inj" in value.lower()`` check.
 
+        Always ``False`` when :attr:`uses_local_strain` is true: that magic
+        substring check only lives inside ``simple_pe_datafind`` (confirmed
+        directly from its real source), and providing ``--strain`` skips
+        that executable -- and the whole ``DataFindNode`` it belongs to --
+        entirely (confirmed directly from ``simple_pe_pipe``'s real
+        ``main()``). Without this, a real local channel name that happens
+        to contain "inj" (e.g. a custom test frame's channel literally
+        called "Injection") would be misrouted into simulate-injection
+        mode even though real local strain data was provided -- confirmed
+        directly via a real user's project ledger, whose fake-transient
+        frames use exactly this channel name.
+
         Exposed as a property (rather than a leading-underscore helper) so
         ``configs/simplepe.ini`` can reference it directly as
         ``pipeline.uses_injection`` -- computing this same case-insensitive
@@ -142,8 +154,75 @@ class SimplePE(Pipeline):
         ``INJ`` at all), so this is computed once, in Python, and shared by
         both the template and :meth:`before_config`.
         """
+        if self.uses_local_strain:
+            return False
         channels = self.production.meta.get("data", {}).get("channels", {})
         return any("inj" in str(value).lower() for value in channels.values())
+
+    @property
+    def uses_local_strain(self):
+        """
+        Whether every interferometer in this production has a local frame
+        file available via the standard Asimov ``data.data files``
+        metadata key.
+
+        ``data files`` is a real, core Asimov convention, not a plugin
+        invention: confirmed directly from
+        ``asimov.analysis.GravitationalWaveTransient.__init__``, which
+        defaults ``self.meta["data"]["data files"] = {}`` for every
+        production, and from the sibling ``asimov-gwdata`` datafind
+        pipeline, which populates it with exactly this
+        ``{ifo: [path, ...]}`` shape.
+
+        When true, ``configs/simplepe.ini`` renders a ``strain = {...}``
+        option alongside ``channels``. Confirmed directly from
+        ``simple_pe_pipe``'s real source (``simple_pe/cli/simple_pe_pipe.py``'s
+        ``main()``): providing ``--strain`` at all -- regardless of its
+        value -- skips ``DataFindNode``/``simple_pe_datafind`` entirely,
+        and ``FilterNode``/``AnalysisNode`` read the given local frame file
+        directly (via ``simple_pe.io.io.load_strain_data_from_file()``,
+        which hands ``--strain``/``--channels`` straight to
+        ``gwpy.timeseries.TimeSeries.read()``) instead of going through any
+        channel-based data acquisition at all.
+        """
+        ifos = self.production.meta.get("interferometers", [])
+        data_files = self.production.meta.get("data", {}).get("data files", {})
+        if not ifos or not data_files:
+            return False
+        return all(data_files.get(ifo) for ifo in ifos)
+
+    @property
+    def local_strain(self):
+        """
+        Per-interferometer local frame-file path for
+        ``configs/simplepe.ini``'s ``strain = {...}`` line, valid only when
+        :attr:`uses_local_strain` is true.
+
+        ``simple_pe_pipe --help`` documents ``--strain``'s bare
+        ``IFO:path`` form as a single file per interferometer, and its
+        underlying ini parsing (``pesummary.core.cli.actions.ConfigAction``'s
+        ``dict_from_str()`` -- the same one used for
+        ``channels``/``psd``/``asd``) has no list-literal syntax. So this
+        requires exactly one frame file per interferometer in
+        ``data['data files']`` and raises a clear error otherwise, rather
+        than silently picking one of several. Stitching multiple local
+        frame files together per interferometer isn't currently supported
+        by this plugin.
+        """
+        ifos = self.production.meta.get("interferometers", [])
+        data_files = self.production.meta.get("data", {}).get("data files", {})
+        strain = {}
+        for ifo in ifos:
+            paths = data_files.get(ifo, [])
+            if len(paths) != 1:
+                raise PipelineException(
+                    f"production.meta['data']['data files']['{ifo}'] must "
+                    f"contain exactly one frame file (got {len(paths)}); "
+                    "this plugin doesn't yet support stitching multiple "
+                    "local frame files together for a single interferometer."
+                )
+            strain[ifo] = paths[0]
+        return strain
 
     def _write_injection_parameters(self):
         """
