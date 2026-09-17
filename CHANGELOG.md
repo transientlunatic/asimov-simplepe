@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `configs/simplepe.ini` now renders a `strain = {...}` option, sourced
+  from the standard Asimov `data.data files` metadata key (confirmed
+  directly from asimov core's real source --
+  `asimov.analysis.GravitationalWaveTransient.__init__` defaults
+  `self.meta["data"]["data files"] = {}` for every production -- and from
+  the sibling `asimov-gwdata` datafind pipeline, which populates it with
+  exactly this `{ifo: [path, ...]}` shape), when every interferometer in
+  the analysis has exactly one frame file there. This plugin previously
+  had no code path for local frame files at all -- confirmed directly by
+  grepping its own source for "frame", which found nothing -- despite
+  `data files` being a real, standard, core-recognised key. Confirmed
+  directly from `simple_pe_pipe`'s real source
+  (`simple_pe/cli/simple_pe_pipe.py`'s `main()`, obtained from a
+  real user's own local clone of `simple-pe` after its `--help`/Namespace
+  output alone wasn't enough to pin down the exact wiring): supplying
+  `--strain` at all -- regardless of its value -- makes `simple_pe_pipe`
+  skip `DataFindNode`/`simple_pe_datafind` entirely, reading the given
+  local frame file directly via `gwpy.timeseries.TimeSeries.read()`
+  instead. This also fixes a real, related bug: a real user's custom
+  test frames used a genuine local channel literally named `Injection`
+  (containing the `"inj"` substring `simple_pe_datafind`'s own magic-value
+  detection matches on), which was being misrouted into INJ
+  simulate-injection mode -- discarding the real frame files entirely and
+  hitting the upstream `SimplePESamples` NaN-GPS bug documented below --
+  even though real local strain data was available. `SimplePE.uses_injection`
+  is now unconditionally `False` whenever `SimplePE.uses_local_strain` is
+  true, since that whole magic-value code path lives only inside
+  `simple_pe_datafind`, which local-strain mode never invokes. More than
+  one frame file per interferometer isn't supported yet: `simple_pe_pipe`'s
+  bare `--strain IFO:path` ini-dict form (the same format used for
+  `channels`/`psd`/`asd`) has no list-literal syntax for stitching several
+  files together, so `SimplePE.local_strain` raises a clear
+  `PipelineException` instead of silently picking one.
+
 ### Fixed
 - `configs/simplepe.ini` now renders `psd` from `production.psds` as the
   primary source, not just `data.psd`. `production.psds` is a real,

@@ -1081,6 +1081,162 @@ class TestRealConfigRendering:
             mock_production.rundir, "injection.json"
         )
 
+    def test_template_renders_strain_for_local_frame_files(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # `data.data files` is a real, core Asimov metadata key (confirmed
+        # directly from asimov core's real `GravitationalWaveTransient.
+        # __init__`, and from the sibling `asimov-gwdata` datafind
+        # pipeline populating it with exactly this `{ifo: [path, ...]}`
+        # shape) -- confirmed directly from a real user's project ledger
+        # that this, not the ini-format's `--channels`-based data
+        # acquisition, is how local frame files actually get supplied.
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {
+                "H1": "H1:GDS-CALIB_STRAIN",
+                "L1": "L1:GDS-CALIB_STRAIN",
+            },
+            "data files": {
+                "H1": ["/frames/H1_event.gwf"],
+                "L1": ["/frames/L1_event.gwf"],
+            },
+        }
+
+        pipeline = SimplePE(mock_production)
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert (
+            parser.get("pipeline", "strain")
+            == "{H1:/frames/H1_event.gwf,L1:/frames/L1_event.gwf}"
+        )
+        assert (
+            parser.get("pipeline", "channels")
+            == "{H1:GDS-CALIB_STRAIN,L1:GDS-CALIB_STRAIN}"
+        )
+
+    def test_local_strain_bypasses_injection_channel_detection(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # Confirmed directly from a real user's project ledger: a custom
+        # test frame's real channel can legitimately be named "Injection"
+        # (containing the "inj" substring simple_pe_datafind's own magic-
+        # value detection matches on), while still providing real local
+        # frame data via `data files`. Since supplying `--strain` at all
+        # makes simple_pe_pipe skip DataFindNode/simple_pe_datafind
+        # entirely (confirmed directly from its real `main()`), that
+        # magic-value detection never runs -- so this must NOT be treated
+        # as an INJ-mode production (no injection.json, no `injection =`
+        # line), even though the channel name contains "inj".
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {
+                "H1": "H1:Injection",
+                "L1": "L1:Injection",
+            },
+            "data files": {
+                "H1": ["/frames/H1_event.gwf"],
+                "L1": ["/frames/L1_event.gwf"],
+            },
+        }
+
+        pipeline = SimplePE(mock_production)
+        assert pipeline.uses_local_strain is True
+        assert pipeline.uses_injection is False
+
+        pipeline.before_config()
+        assert not os.path.exists(pipeline._injection_parameters_file())
+
+        liq = Liquid(pipeline.config_template)
+        rendered = liq.render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+
+        cfg_path = os.path.join(temp_dir, "simplepe-test.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+
+        parser = Pipeline.read_ini(cfg_path)
+        assert (
+            parser.get("pipeline", "channels") == "{H1:Injection,L1:Injection}"
+        )
+        assert not parser.has_option("pipeline", "injection")
+
+    def test_local_strain_requires_every_ifo_to_have_a_frame_file(
+        self, mock_production, mock_config
+    ):
+        # Partial coverage (e.g. a `data files` block that only lists one
+        # of two analysis interferometers) can't be mapped onto a single
+        # simple_pe_pipe CLI mode -- so it's conservatively treated as "not
+        # using local strain" and falls through to the ordinary
+        # channel-based data acquisition path, rather than guessing.
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {
+                "H1": "H1:GDS-CALIB_STRAIN",
+                "L1": "L1:GDS-CALIB_STRAIN",
+            },
+            "data files": {
+                "H1": ["/frames/H1_event.gwf"],
+            },
+        }
+
+        pipeline = SimplePE(mock_production)
+        assert pipeline.uses_local_strain is False
+
+    def test_local_strain_rejects_multiple_frame_files_per_ifo(
+        self, mock_production, mock_config
+    ):
+        # simple_pe_pipe's bare `--strain IFO:path` form (the same
+        # ini-dict format used for channels/psd/asd) only supports a
+        # single file per interferometer -- confirmed directly from its
+        # real --help and the underlying ini dict_from_str() parser, which
+        # has no list-literal syntax. Rather than silently picking one of
+        # several frame files, this should fail loudly.
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["data"] = {
+            "channels": {
+                "H1": "H1:GDS-CALIB_STRAIN",
+                "L1": "L1:GDS-CALIB_STRAIN",
+            },
+            "data files": {
+                "H1": ["/frames/H1_event_0001.gwf", "/frames/H1_event_0002.gwf"],
+                "L1": ["/frames/L1_event.gwf"],
+            },
+        }
+
+        pipeline = SimplePE(mock_production)
+        assert pipeline.uses_local_strain is True
+        with pytest.raises(PipelineException):
+            pipeline.local_strain
+
 
 def test_module_imports():
     from asimov_simplepe import SimplePE as _SimplePE

@@ -348,6 +348,52 @@ whenever any channel is ``INJ``:
    fixed upstream, but its own e2e test uses ``GWOSC`` instead to avoid
    depending on that fix.
 
+Local frame files
+~~~~~~~~~~~~~~~~~~
+
+Asimov core also has a built-in mechanism for *local* frame files:
+``data.data files``, confirmed directly from its real source
+(``asimov.analysis.GravitationalWaveTransient.__init__`` defaults
+``self.meta["data"]["data files"] = {}`` for every production), and
+populated by data-retrieval pipelines such as
+`asimov-gwdata <https://github.com/etive-io/asimov-gwdata>`_ with exactly
+this ``{ifo: [path, ...]}`` shape. When every interferometer in the
+analysis has exactly one frame file here, this plugin renders a
+``strain = {...}`` option alongside ``channels``:
+
+.. code-block:: yaml
+
+   data:
+     channels:
+       H1: Injection
+       L1: Injection
+     data files:
+       H1:
+       - /path/to/H1_event.gwf
+       L1:
+       - /path/to/L1_event.gwf
+
+Confirmed directly from ``simple_pe_pipe``'s real source: providing
+``--strain`` at all makes it skip ``DataFindNode``/``simple_pe_datafind``
+entirely and read the local frame file directly instead (via
+``gwpy.timeseries.TimeSeries.read()``). Since the ``INJ``/``GWOSC``
+channel magic-value detection above lives *only* inside
+``simple_pe_datafind``, it never runs in this mode either -- so a real
+channel name that happens to contain "inj" (as in the example above, a
+custom test frame's channel literally called "Injection") is read
+literally, and this is *not* treated as ``INJ`` mode: no
+``injection.json`` is written, and the upstream ``SimplePESamples`` bug
+above doesn't apply.
+
+.. warning::
+
+   More than one frame file per interferometer isn't currently
+   supported. ``simple_pe_pipe``'s bare ``--strain IFO:path`` ini-dict
+   form -- the same format used for ``channels``/``psd``/``asd`` -- has
+   no list-literal syntax for stitching several files together, so this
+   plugin raises a clear error rather than silently picking one of
+   several.
+
 Status messages
 ~~~~~~~~~~~~~~~~
 

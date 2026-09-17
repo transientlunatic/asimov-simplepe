@@ -223,6 +223,28 @@ conventions as the other Asimov gravitational-wave pipeline plugins (e.g.
 
   Supplying neither omits the `psd`/`asd` key entirely, which
   `simple_pe_pipe` will itself reject.
+- **`data.data files`** -- Asimov core's own, built-in mechanism for
+  *local* frame files (confirmed directly from its real source,
+  `asimov.analysis.GravitationalWaveTransient.__init__`, which defaults
+  `self.meta["data"]["data files"] = {}` for every production, and from
+  the sibling [asimov-gwdata](https://github.com/etive-io/asimov-gwdata)
+  datafind pipeline, which populates it with exactly this
+  `{ifo: [path, ...]}` shape). When every interferometer in the analysis
+  has exactly one frame file here, this plugin renders a `strain =
+  {...}` option alongside `channels`. Confirmed directly from
+  `simple_pe_pipe`'s real source: providing `--strain` at all makes it
+  skip `DataFindNode`/`simple_pe_datafind` entirely and read the local
+  frame file directly instead (via `gwpy.timeseries.TimeSeries.read()`)
+  -- which also means the `INJ`/`GWOSC` channel magic-value detection
+  above never runs, so a real channel name that happens to contain
+  "inj" (e.g. a custom test frame's channel literally called
+  "Injection") is read literally instead of being misrouted into
+  simulate-injection mode and its upstream bug. **Known limitation:**
+  more than one frame file per interferometer isn't currently supported
+  (`simple_pe_pipe`'s bare `--strain IFO:path` ini-dict form -- the same
+  format used for `channels`/`psd`/`asd` -- has no list-literal syntax
+  for stitching several files together); this raises a clear error
+  rather than silently picking one.
 
 This means a production populated by a data-retrieval step (for example
 [asimov-gwdata](https://github.com/etive-io/asimov-gwdata)) can be picked
