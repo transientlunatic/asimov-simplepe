@@ -278,6 +278,35 @@ default to 1.4 (solar masses), `ra`/`dec`/`spin1z`/`spin2z`/`phase`/`psi`
 default to 0, and `distance` defaults to 400 Mpc; `time` is always taken
 from the event's `event time`, not from this block.
 
+### Regenerating a production's ini
+
+Asimov core's own `asimov manage build` command (`asimov/cli/manage.py`'s
+`build()`, confirmed directly from its real source) only renders a
+production's `.ini` -- and only calls this plugin's
+`before_config()`/`make_config()` at all -- when **no `.ini` already
+exists** for that production in the event repository. If one is already
+checked in, `asimov manage build` finds it via
+`production.event.repository.find_prods()`, does nothing, and moves on:
+it does *not* re-render the ini and does *not* re-run `before_config()`
+(which is what (re)writes `trigger_parameters.json`/`injection.json` into
+the rundir).
+
+This matters whenever a production's rundir has been cleared/reset (e.g.
+after a stale/interrupted run) while its `.ini` is still checked into the
+repository, or after upgrading this plugin to a version that changes what
+the ini should contain: simply rerunning `asimov manage build` is a no-op
+in both cases, and `asimov manage submit` will then fail because the
+rundir-side files the (unchanged) ini still references are missing or
+stale. To force a real regeneration, remove the existing `.ini` first
+(and, for a clean rundir, the working directory too) before rebuilding:
+
+```bash
+rm path/to/checkouts/<event>/<category>/<production>.ini
+rm -rf path/to/working/<event>/<production>/
+asimov manage build
+asimov manage submit
+```
+
 ### Post-processing
 
 This plugin does not run PESummary (or anything else) itself. When a

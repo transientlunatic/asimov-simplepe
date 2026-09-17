@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- README/docs: documented a real asimov-core operational gotcha that
+  caused genuine confusion for a real user across two separate error
+  reports. `asimov manage build` (`asimov/cli/manage.py`'s `build()`,
+  confirmed directly from its real source) only calls this plugin's
+  `before_config()`/`make_config()` when no `.ini` already exists for a
+  production -- if one is already checked into the event repository, it's
+  reused as-is with no regeneration and no `before_config()` call. So
+  simply rerunning `asimov manage build` after a production's rundir gets
+  cleared/reset is a silent no-op: `trigger_parameters.json`/
+  `injection.json` never get rewritten, and any ini fields that changed
+  (e.g. after upgrading this plugin) never get picked up either. Fixing
+  this for real requires removing the existing `.ini` first, so
+  `find_prods()` raises `KeyError` and asimov actually takes the
+  regeneration branch.
+
 ### Added
 - `configs/simplepe.ini` now renders a `strain = {...}` option, sourced
   from the standard Asimov `data.data files` metadata key (confirmed
