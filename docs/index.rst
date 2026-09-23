@@ -414,6 +414,38 @@ Status messages
    posterior samples file exists). This is a terminal state as far as this plugin is
    concerned -- see *Post-processing* below for what (if anything) happens next.
 
+Regenerating a production's ini
+--------------------------------
+
+Asimov core's own ``asimov manage build`` command
+(``asimov/cli/manage.py``'s ``build()``, confirmed directly from its real
+source) only renders a production's ``.ini`` -- and only calls this
+plugin's :meth:`before_config()
+<asimov_simplepe.simplepe.SimplePE.before_config>`/``make_config()`` at
+all -- when **no ``.ini`` already exists** for that production in the
+event repository. If one is already checked in, ``asimov manage build``
+finds it via ``production.event.repository.find_prods()``, does nothing,
+and moves on: it does *not* re-render the ini and does *not* re-run
+``before_config()`` (which is what (re)writes
+``trigger_parameters.json``/``injection.json`` into the rundir).
+
+This matters whenever a production's rundir has been cleared/reset (e.g.
+after a stale/interrupted run) while its ``.ini`` is still checked into
+the repository, or after upgrading this plugin to a version that changes
+what the ini should contain: simply rerunning ``asimov manage build`` is
+a no-op in both cases, and ``asimov manage submit`` will then fail
+because the rundir-side files the (unchanged) ini still references are
+missing or stale. To force a real regeneration, remove the existing
+``.ini`` first (and, for a clean rundir, the working directory too)
+before rebuilding:
+
+.. code-block:: bash
+
+   rm path/to/checkouts/<event>/<category>/<production>.ini
+   rm -rf path/to/working/<event>/<production>/
+   asimov manage build
+   asimov manage submit
+
 Post-processing
 ----------------
 
