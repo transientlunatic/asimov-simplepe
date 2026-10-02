@@ -305,6 +305,10 @@ class SimplePE(Pipeline):
             "phase": trigger.get("phase", 0),
             "psi": trigger.get("psi", 0),
         }
+        if self.production.meta.get("localization file"):
+            # simple_pe_analysis takes the sky position either from a
+            # localization file or from ra/dec, and refuses both.
+            del values["ra"], values["dec"]
         with open(self._trigger_parameters_file(), "w") as trigger_file:
             json.dump(values, trigger_file)
 
