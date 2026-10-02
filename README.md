@@ -151,6 +151,17 @@ loop runs zero times and the DAG silently ends up containing only its
 `datafind` job, no error of any kind. Confirmed directly via this
 plugin's own e2e CI, which is why this template always sets it.
 
+### Sky localisation
+
+`production.meta['localization file']` (unset by default) is the path to a
+FITS skymap, rendered as `localization_file` in the ini. `simple_pe_analysis`
+draws its sky-position samples from it; this is how a real analysis uses the
+search's BAYESTAR skymap. Without one, every posterior sample has the single
+sky position from the trigger, so the other parameters are conditioned on
+that position and no skymap can be produced. When a localization file is
+given, `ra`/`dec` are left out of the trigger parameters, because
+`simple_pe_analysis` raises if given both.
+
 ### Effective sample target
 
 `neffective` (unset by default) caps the number of effective posterior

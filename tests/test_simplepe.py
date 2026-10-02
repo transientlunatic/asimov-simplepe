@@ -83,6 +83,44 @@ class TestBeforeConfig:
         assert data["mass_2"] == 29
         assert data["time"] == 1126259462.4
 
+    def test_trigger_parameters_keep_sky_position_without_localization_file(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["trigger"] = dict(
+            mock_production.meta["trigger"], ra=1.0, dec=0.5
+        )
+        SimplePE(mock_production).before_config()
+
+        with open(
+            os.path.join(mock_production.rundir, "trigger_parameters.json")
+        ) as f:
+            data = json.load(f)
+        assert data["ra"] == 1.0
+        assert data["dec"] == 0.5
+
+    def test_trigger_parameters_omit_sky_position_with_localization_file(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # simple_pe_analysis takes the sky from a localization file or from
+        # ra/dec, and raises if given both.
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["trigger"] = dict(
+            mock_production.meta["trigger"], ra=1.0, dec=0.5
+        )
+        mock_production.meta["localization file"] = "/skymaps/event.fits"
+        SimplePE(mock_production).before_config()
+
+        with open(
+            os.path.join(mock_production.rundir, "trigger_parameters.json")
+        ) as f:
+            data = json.load(f)
+        assert "ra" not in data
+        assert "dec" not in data
+        assert data["mass_1"] == 36
+
     def test_trigger_parameters_defaults_when_no_trigger_meta(
         self, mock_production, mock_config, temp_dir
     ):
@@ -1036,6 +1074,44 @@ class TestRealConfigRendering:
 
         parser = Pipeline.read_ini(cfg_path)
         assert parser.get("pipeline", "peak_finder") == "scipy"
+
+    def _render_ini(self, mock_production, temp_dir, **meta):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        os.makedirs(mock_production.rundir, exist_ok=True)
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta.update(meta)
+
+        pipeline = SimplePE(mock_production)
+        rendered = Liquid(pipeline.config_template).render(
+            production=mock_production,
+            analysis=mock_production,
+            pipeline=pipeline,
+            config=real_config,
+        )
+        cfg_path = os.path.join(temp_dir, "simplepe-localization.ini")
+        with open(cfg_path, "w") as f:
+            f.write(rendered)
+        return Pipeline.read_ini(cfg_path)
+
+    def test_template_renders_localization_file(
+        self, mock_production, mock_config, temp_dir
+    ):
+        parser = self._render_ini(
+            mock_production,
+            temp_dir,
+            **{"localization file": "/skymaps/event.fits"},
+        )
+        assert parser.get("pipeline", "localization_file") == "/skymaps/event.fits"
+
+    def test_template_omits_localization_file_by_default(
+        self, mock_production, mock_config, temp_dir
+    ):
+        parser = self._render_ini(mock_production, temp_dir)
+        assert not parser.has_option("pipeline", "localization_file")
 
     def test_template_renders_injection_key_for_inj_channels(
         self, mock_production, mock_config, temp_dir

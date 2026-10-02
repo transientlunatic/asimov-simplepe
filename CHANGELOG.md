@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `localization file` in the production metadata is rendered as
+  `localization_file` in the ini, so `simple_pe_analysis` draws its sky
+  samples from a skymap (e.g. a BAYESTAR FITS file) instead of the single
+  sky position in the trigger. Without one the posterior is conditioned on
+  that one position and no skymap can be produced. `ra`/`dec` are then left
+  out of the trigger-parameters file, as `simple_pe_analysis` refuses both.
+
 ### Documentation
 - README/docs: documented a real asimov-core operational gotcha that
   caused genuine confusion for a real user across two separate error
