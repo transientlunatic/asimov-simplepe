@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that one position and no skymap can be produced. `ra`/`dec` are then left
   out of the trigger-parameters file, as `simple_pe_analysis` refuses both.
 
+### Fixed
+- `samples()` (and so `detect_completion()`) no longer counts
+  `metric_samples.dat`, the intermediate file `simple_pe_analysis` writes
+  part-way through a run. It matched the broad `*samples*.dat` fallback, so an
+  analysis which was still computing its sky/distance/orientation samples was
+  reported as finished, and a dependent analysis (PESummary) started from the
+  3-parameter intermediate. Only the real `posterior_samples.*` output now
+  completes the analysis.
+
 ### Documentation
 - README/docs: documented a real asimov-core operational gotcha that
   caused genuine confusion for a real user across two separate error

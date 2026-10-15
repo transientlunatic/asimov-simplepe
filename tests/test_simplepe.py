@@ -642,6 +642,41 @@ class TestDetectCompletionAndSamples:
 
         assert pipeline.samples() == [real]
 
+    def test_intermediate_metric_samples_are_not_a_result(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # simple_pe_analysis writes output/metric_samples.dat part-way
+        # through the run; it matches the broad ``*samples*.dat`` pattern but
+        # is not the posterior, so a run which has only produced it is not
+        # finished.
+        mock_production.rundir = temp_dir
+        output = os.path.join(temp_dir, "output")
+        os.makedirs(output)
+        with open(os.path.join(output, "metric_samples.dat"), "w") as f:
+            f.write("chirp_mass symmetric_mass_ratio chi_align\n23.3 0.17 -0.26\n")
+
+        pipeline = SimplePE(mock_production)
+
+        assert pipeline.samples() == []
+        assert pipeline.detect_completion() is False
+
+    def test_posterior_samples_found_alongside_metric_samples(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = temp_dir
+        output = os.path.join(temp_dir, "output")
+        os.makedirs(output)
+        with open(os.path.join(output, "metric_samples.dat"), "w") as f:
+            f.write("chirp_mass\n23.3\n")
+        posterior = os.path.join(output, "posterior_samples.dat")
+        with open(posterior, "w") as f:
+            f.write("mass_1 mass_2 luminosity_distance\n43.0 18.0 1100.\n")
+
+        pipeline = SimplePE(mock_production)
+
+        assert pipeline.samples() == [posterior]
+        assert pipeline.detect_completion() is True
+
 
 class TestCollectAssets:
     def test_returns_samples_key(self, mock_production, mock_config, temp_dir):
