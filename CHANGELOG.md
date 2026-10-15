@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `seed` in the production metadata is rendered as `seed` in the ini. It is
+  left unset by default, so `simple_pe_pipe`'s own fixed default applies and a
+  rerun reproduces its samples. Because that seed is fixed, a failure inside
+  simple-pe on one particular draw is repeated identically by every
+  resubmission; setting a different seed is the way past it.
 - `localization file` in the production metadata is rendered as
   `localization_file` in the ini, so `simple_pe_analysis` draws its sky
   samples from a skymap (e.g. a BAYESTAR FITS file) instead of the single
