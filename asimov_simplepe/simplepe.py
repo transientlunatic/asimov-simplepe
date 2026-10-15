@@ -26,6 +26,10 @@ from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
 from asimov.utils import set_directory
 
 
+#: Sample files ``simple_pe_analysis`` writes before the run has finished.
+INTERMEDIATE_SAMPLES = frozenset({"metric_samples.dat"})
+
+
 class SimplePE(Pipeline):
     """
     The Simple-PE pipeline integration for Asimov.
@@ -528,6 +532,18 @@ class SimplePE(Pipeline):
             # would otherwise be indistinguishable from a genuine, complete
             # samples file.
             matches = [match for match in matches if os.path.getsize(match) > 0]
+            # ``simple_pe_analysis`` writes ``metric_samples.dat`` part-way
+            # through the run (the Gaussian samples drawn from the metric,
+            # before the sky/distance/orientation samples are generated), long
+            # before the real ``posterior_samples.dat`` is written at the very
+            # end. It matches the broad ``*samples*.dat`` pattern, so counting
+            # it makes a still-running analysis look finished, and a
+            # downstream analysis would start from a 3-parameter intermediate.
+            matches = [
+                match
+                for match in matches
+                if os.path.basename(match) not in INTERMEDIATE_SAMPLES
+            ]
             if matches:
                 return matches
         return []
