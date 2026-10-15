@@ -660,6 +660,22 @@ class TestDetectCompletionAndSamples:
         assert pipeline.samples() == []
         assert pipeline.detect_completion() is False
 
+    def test_checkpoint_before_final_sampling_is_not_a_result(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # samples_after_incl_dist_sampling.dat is written before the final
+        # sampling step finishes, and also matches ``*samples*.dat``.
+        mock_production.rundir = temp_dir
+        with open(
+            os.path.join(temp_dir, "samples_after_incl_dist_sampling.dat"), "w"
+        ) as f:
+            f.write("mass_1 mass_2\n43.0 18.0\n")
+
+        pipeline = SimplePE(mock_production)
+
+        assert pipeline.samples() == []
+        assert pipeline.detect_completion() is False
+
     def test_posterior_samples_found_alongside_metric_samples(
         self, mock_production, mock_config, temp_dir
     ):

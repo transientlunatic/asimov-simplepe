@@ -27,7 +27,14 @@ from asimov.utils import set_directory
 
 
 #: Sample files ``simple_pe_analysis`` writes before the run has finished.
-INTERMEDIATE_SAMPLES = frozenset({"metric_samples.dat"})
+INTERMEDIATE_SAMPLES = frozenset(
+    {
+        # the three metric parameters, drawn before sky/distance/orientation
+        "metric_samples.dat",
+        # a checkpoint written before the final (rejection) sampling step
+        "samples_after_incl_dist_sampling.dat",
+    }
+)
 
 
 class SimplePE(Pipeline):
