@@ -951,6 +951,36 @@ class TestRealConfigRendering:
         parser = Pipeline.read_ini(cfg_path)
         assert parser.get("pipeline", "neffective") == "20"
 
+    def test_template_renders_seed_only_when_set(
+        self, mock_production, mock_config, temp_dir
+    ):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        def render(meta_seed):
+            mock_production.rundir = os.path.join(temp_dir, f"run-{meta_seed}")
+            os.makedirs(mock_production.rundir, exist_ok=True)
+            mock_production.meta = dict(mock_production.meta)
+            mock_production.meta.pop("seed", None)
+            if meta_seed is not None:
+                mock_production.meta["seed"] = meta_seed
+            pipeline = SimplePE(mock_production)
+            rendered = Liquid(pipeline.config_template).render(
+                production=mock_production,
+                analysis=mock_production,
+                pipeline=pipeline,
+                config=real_config,
+            )
+            cfg_path = os.path.join(temp_dir, f"simplepe-seed-{meta_seed}.ini")
+            with open(cfg_path, "w") as f:
+                f.write(rendered)
+            return Pipeline.read_ini(cfg_path)
+
+        # simple_pe_pipe's own fixed default applies unless a seed is given
+        assert not render(None).has_option("pipeline", "seed")
+        assert render(20260715).get("pipeline", "seed") == "20260715"
+
     def test_template_renders_psd_instead_of_asd(
         self, mock_production, mock_config, temp_dir
     ):
