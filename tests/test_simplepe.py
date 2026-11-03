@@ -83,6 +83,39 @@ class TestBeforeConfig:
         assert data["mass_2"] == 29
         assert data["time"] == 1126259462.4
 
+    def test_trigger_parameters_include_in_plane_spins_when_given(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        mock_production.meta = dict(mock_production.meta)
+        mock_production.meta["trigger"] = {
+            **mock_production.meta.get("trigger", {}),
+            "spin1x": 0.2,
+            "spin1y": -0.1,
+            "spin2x": -0.05,
+            "spin2y": 0.15,
+        }
+        SimplePE(mock_production).before_config()
+        with open(
+            os.path.join(mock_production.rundir, "trigger_parameters.json")
+        ) as f:
+            data = json.load(f)
+        assert data["spin_1x"] == 0.2
+        assert data["spin_1y"] == -0.1
+        assert data["spin_2x"] == -0.05
+        assert data["spin_2y"] == 0.15
+
+    def test_trigger_parameters_omit_in_plane_spins_by_default(
+        self, mock_production, mock_config, temp_dir
+    ):
+        mock_production.rundir = os.path.join(temp_dir, "run")
+        SimplePE(mock_production).before_config()
+        with open(
+            os.path.join(mock_production.rundir, "trigger_parameters.json")
+        ) as f:
+            data = json.load(f)
+        assert not any(k in data for k in ("spin_1x", "spin_1y", "spin_2x", "spin_2y"))
+
     def test_trigger_parameters_keep_sky_position_without_localization_file(
         self, mock_production, mock_config, temp_dir
     ):
@@ -660,6 +693,22 @@ class TestDetectCompletionAndSamples:
         assert pipeline.samples() == []
         assert pipeline.detect_completion() is False
 
+    def test_checkpoint_before_final_sampling_is_not_a_result(
+        self, mock_production, mock_config, temp_dir
+    ):
+        # samples_after_incl_dist_sampling.dat is written before the final
+        # sampling step finishes, and also matches ``*samples*.dat``.
+        mock_production.rundir = temp_dir
+        with open(
+            os.path.join(temp_dir, "samples_after_incl_dist_sampling.dat"), "w"
+        ) as f:
+            f.write("mass_1 mass_2\n43.0 18.0\n")
+
+        pipeline = SimplePE(mock_production)
+
+        assert pipeline.samples() == []
+        assert pipeline.detect_completion() is False
+
     def test_posterior_samples_found_alongside_metric_samples(
         self, mock_production, mock_config, temp_dir
     ):
@@ -934,6 +983,77 @@ class TestRealConfigRendering:
 
         parser = Pipeline.read_ini(cfg_path)
         assert parser.get("pipeline", "neffective") == "20"
+
+    def test_template_renders_seed_only_when_set(
+        self, mock_production, mock_config, temp_dir
+    ):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        def render(meta_seed):
+            mock_production.rundir = os.path.join(temp_dir, f"run-{meta_seed}")
+            os.makedirs(mock_production.rundir, exist_ok=True)
+            mock_production.meta = dict(mock_production.meta)
+            mock_production.meta.pop("seed", None)
+            if meta_seed is not None:
+                mock_production.meta["seed"] = meta_seed
+            pipeline = SimplePE(mock_production)
+            rendered = Liquid(pipeline.config_template).render(
+                production=mock_production,
+                analysis=mock_production,
+                pipeline=pipeline,
+                config=real_config,
+            )
+            cfg_path = os.path.join(temp_dir, f"simplepe-seed-{meta_seed}.ini")
+            with open(cfg_path, "w") as f:
+                f.write(rendered)
+            return Pipeline.read_ini(cfg_path)
+
+        # simple_pe_pipe's own fixed default applies unless a seed is given
+        assert not render(None).has_option("pipeline", "seed")
+        assert render(20260715).get("pipeline", "seed") == "20260715"
+
+    def test_template_renders_simple_pe_options(
+        self, mock_production, mock_config, temp_dir
+    ):
+        from asimov import config as real_config
+        from asimov.pipeline import Pipeline
+        from liquid import Liquid
+
+        def render(options):
+            mock_production.rundir = os.path.join(temp_dir, "run-options")
+            os.makedirs(mock_production.rundir, exist_ok=True)
+            mock_production.meta = dict(mock_production.meta)
+            mock_production.meta.pop("simple-pe options", None)
+            if options is not None:
+                mock_production.meta["simple-pe options"] = options
+            pipeline = SimplePE(mock_production)
+            rendered = Liquid(pipeline.config_template).render(
+                production=mock_production,
+                analysis=mock_production,
+                pipeline=pipeline,
+                config=real_config,
+            )
+            cfg_path = os.path.join(temp_dir, "simplepe-options.ini")
+            with open(cfg_path, "w") as f:
+                f.write(rendered)
+            return Pipeline.read_ini(cfg_path)
+
+        assert not render(None).has_option("pipeline", "minimum_data_length")
+        parser = render(
+            {
+                "minimum_data_length": 128,
+                "incl_dist_method": "mixture",
+                "metric_directions": "['chirp_mass', 'chi_p2']",
+            }
+        )
+        assert parser.get("pipeline", "minimum_data_length") == "128"
+        assert parser.get("pipeline", "incl_dist_method") == "mixture"
+        assert (
+            parser.get("pipeline", "metric_directions")
+            == "['chirp_mass', 'chi_p2']"
+        )
 
     def test_template_renders_psd_instead_of_asd(
         self, mock_production, mock_config, temp_dir

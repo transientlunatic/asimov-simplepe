@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `simple-pe options` in the production metadata is a mapping of any other
+  `simple_pe_pipe` option to its value (e.g. `minimum_data_length: 128`,
+  `incl_dist_method: mixture`, `metric_directions: "['chirp_mass',
+  'symmetric_mass_ratio', 'chi_align', 'chi_p2']"`). Each is rendered verbatim
+  in the ini.
+- The trigger's `spin1x`, `spin1y`, `spin2x` and `spin2y`, when present, are
+  written to `trigger_parameters.json` (and to the simulated injection), so
+  that simple-pe sees a precessing trigger and can derive `chi_p`.
+- `seed` in the production metadata is rendered as `seed` in the ini. It is
+  left unset by default, so `simple_pe_pipe`'s own fixed default applies and a
+  rerun reproduces its samples. Because that seed is fixed, a failure inside
+  simple-pe on one particular draw is repeated identically by every
+  resubmission; setting a different seed is the way past it.
 - `localization file` in the production metadata is rendered as
   `localization_file` in the ini, so `simple_pe_analysis` draws its sky
   samples from a skymap (e.g. a BAYESTAR FITS file) instead of the single
@@ -17,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `samples()` (and so `detect_completion()`) no longer counts
-  `metric_samples.dat`, the intermediate file `simple_pe_analysis` writes
-  part-way through a run. It matched the broad `*samples*.dat` fallback, so an
+  `metric_samples.dat` or `samples_after_incl_dist_sampling.dat`, the
+  intermediate files `simple_pe_analysis` writes part-way through a run. It matched the broad `*samples*.dat` fallback, so an
   analysis which was still computing its sky/distance/orientation samples was
   reported as finished, and a dependent analysis (PESummary) started from the
   3-parameter intermediate. Only the real `posterior_samples.*` output now
