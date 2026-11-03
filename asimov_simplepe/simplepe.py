@@ -270,11 +270,11 @@ class SimplePE(Pipeline):
         injection = {
             "mass_1": trigger.get("mass1", 1.4),
             "mass_2": trigger.get("mass2", 1.4),
-            "spin_1x": 0,
-            "spin_1y": 0,
+            "spin_1x": trigger.get("spin1x", 0),
+            "spin_1y": trigger.get("spin1y", 0),
             "spin_1z": trigger.get("spin1z", 0),
-            "spin_2x": 0,
-            "spin_2y": 0,
+            "spin_2x": trigger.get("spin2x", 0),
+            "spin_2y": trigger.get("spin2y", 0),
             "spin_2z": trigger.get("spin2z", 0),
             "ra": trigger.get("ra", 0),
             "dec": trigger.get("dec", 0),
@@ -316,6 +316,13 @@ class SimplePE(Pipeline):
             "phase": trigger.get("phase", 0),
             "psi": trigger.get("psi", 0),
         }
+        # In-plane spins make the trigger precessing: simple-pe derives chi_p
+        # from them, which it needs to sample in chi_p (or chi_p2). They are
+        # only written when the trigger has them, so aligned-spin triggers
+        # stay aligned.
+        for axis in ("1x", "1y", "2x", "2y"):
+            if f"spin{axis}" in trigger:
+                values[f"spin_{axis}"] = trigger[f"spin{axis}"]
         if self.production.meta.get("localization file"):
             # simple_pe_analysis takes the sky position either from a
             # localization file or from ra/dec, and refuses both.

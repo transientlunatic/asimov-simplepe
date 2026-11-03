@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `simple-pe options` in the production metadata is a mapping of any other
+  `simple_pe_pipe` option to its value (e.g. `minimum_data_length: 128`,
+  `incl_dist_method: mixture`, `metric_directions: "['chirp_mass',
+  'symmetric_mass_ratio', 'chi_align', 'chi_p2']"`). Each is rendered verbatim
+  in the ini.
+- The trigger's `spin1x`, `spin1y`, `spin2x` and `spin2y`, when present, are
+  written to `trigger_parameters.json` (and to the simulated injection), so
+  that simple-pe sees a precessing trigger and can derive `chi_p`.
 - `seed` in the production metadata is rendered as `seed` in the ini. It is
   left unset by default, so `simple_pe_pipe`'s own fixed default applies and a
   rerun reproduces its samples. Because that seed is fixed, a failure inside
